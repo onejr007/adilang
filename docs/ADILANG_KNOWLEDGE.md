@@ -523,4 +523,43 @@ protocol keys, but they describe how the ecosystem uses ADILang blocks at runtim
   of the recall loop.
 - LLM summarization consolidates low-importance `event` traces into compact
   KB summaries, keeping context efficient for future vector searches.
-- Build: `cargo test` (native), `wasm-pack build --target web` (WASM).
+  - Build: `cargo test` (native), `wasm-pack build --target web` (WASM).
+
+### 10.5 Public API Hub Caching + Circuit Breaker (`core/public_api_hub.py`)
+- In-memory response cache (TTL 300s, max 200 entries) — cache GET responses
+  by deterministic hash of URL + params + headers to reduce latency & rate-limit pressure.
+- Per-domain circuit breaker (5 consecutive failures -> OPEN 30s -> HALF_OPEN -> CLOSED).
+  Fail-fast in OPEN state prevents cascading failures on external API outages.
+- `_get()`/_get_post()` modified to check cache before HTTP call; all failures
+  recorded in circuit breaker state.
+- Public methods: `cache_stats()`, `circuit_stats()`, `cache_clear()` — the `/stats`
+  Telegram command surfaces these metrics to users.
+- Config via `knowledge_registry.get("api_infra.*")` — TTL, threshold, timeout dinamis.
+
+### 10.6 Response Cache Optimization (`core/response_cache.py`)
+- Replaced O(N) Redis SCAN with O(K) sorted set ZRANGE via `adi:response_cache:index`
+  (sorted set: score=timestamp, member=cache_key) for efficient cache lookups.
+- `_prune_expired()` — O(log N) cleanup via ZREMRANGEBYSCORE removes stale entries
+  before every `get()` call.
+- `_cleanup_in_memory()` — prunes expired in-memory entries on access.
+- LRU eviction: in-memory store bounded at 500 entries (evict oldest).
+- TTL modes: SHORT (300s, weather/crypto), MEDIUM (3600s, default), LONG (86400s, facts).
+- `stats()` method returns hits/misses/errors/hit_rate% for observability.
+- `clear_all()` method for cache flush (Redis + in-memory).
+- 22 unit tests covering cache keys, cosine similarity, Redis, in-memory, TTL, eviction.
+
+### 10.7 Health Monitor v1.1 — Extended Service Monitoring (`core/health_monitor.py`)
+- Expanded from 4 to 7 monitored services: backend_api, redis, rabbitmq,
+  async_worker, frontend_ui, zrok, telegram_bot.
+- `_check_frontend_ui()`: HTTP GET to `frontend_ui:3000`.
+- `_check_zrok()`: HTTP GET to `https://adiapp.share.zrok.io/health`.
+- `_check_telegram_bot()`: Telegram Bot API `getMe` endpoint (verifies bot token validity).
+- Response time tracking: parse `(Nms)` from check output, store per-service.
+- Event history (72h retention, maxlen=100): deque-based, pruned on each `_record_event()`.
+- `get_full_status()` returns: services, failure_counts, response_times_ms,
+  uptime_pct per service, error_messages, healthy_count, total_services, recent_events[-20:].
+- Error message tracking: `_last_errors` dict stores last error per service for diagnostics.
+- Telegram `/uptime` command (alias `/sys`) — full dashboard with service status,
+  response time, uptime %, and recent health events (last 10).
+- 16 unit tests covering service names, response time parsing, event retention,
+  uptime %, full status fields, and 7-service concurrent checks.
