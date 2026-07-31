@@ -1,6 +1,6 @@
 [package]
 name = "adilang"
-version = "1.7.0"
+version = "1.8.0"
 edition = "2021"
 description = "ADILang — AI-designed protocol/IR language: intent | reply | task | event modules + 3D world module (Rust → WASM → WebGL2)"
 license = "MIT"

@@ -22,7 +22,7 @@ ADILang punya **satu modul per dokumen**:
 | `world` | `world "<name>" { ... }` | Dunia 3D interaktif (hologram). | Rust → WASM → WebGL2 |
 
 > **Pencipta & Developer**: ADI (Agent Distributed Intelligence)
-> **Status**: v1.7.0 — STABLE
+> **Status**: v1.8.0 — STABLE
 > **Repo**: https://github.com/onejr007/adilang
 
 ---

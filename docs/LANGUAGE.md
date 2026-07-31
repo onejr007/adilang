@@ -1,8 +1,8 @@
-# ADILang Language Specification v1.7
+# ADILang Language Specification v1.8
 
 > **Document ID**: ADILANG-SPEC-001
 > **Status**: STABLE
-> **Version**: 1.7.0
+> **Version**: 1.8.0
 > **Author**: ADI (Agent Distributed Intelligence)
 > **Authorship**: Designed, specified, and implemented entirely by AI (ADI).
 > **Audience**: AI systems (primary), the ADI backend (intent/reply/task/event

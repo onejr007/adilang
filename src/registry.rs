@@ -12,7 +12,7 @@ use crate::scene::{MaterialKind, MeshKind};
 /// Versi kanonik bahasa ADILang — sumber tunggal kebenaran untuk versi.
 /// Sinkron dengan: Cargo.toml, docs/LANGUAGE.md, docs/adilang.ebnf,
 /// docs/ADILANG_KNOWLEDGE.md, dan core/adilang_protocol.py (backend ADI).
-pub const VERSION: &str = "1.7.0";
+pub const VERSION: &str = "1.8.0";
 
 // ── SUMBER TUNGGAL KEBENARAN untuk builder mesh/material ────────────────────
 // Dipakai oleh: parser.rs `is_builder()`, eval.rs `apply_mesh()/apply_material()`,
