@@ -56,6 +56,12 @@ pub enum Stmt {
         then_branch: Vec<Stmt>,
         else_branch: Vec<Stmt>,
     },
+    /// `while cond { ... }` — loop bertahan selama kondisi truthy.
+    /// Dibatasi evaluator (MAX_LOOP_ITERATIONS) agar deterministik (P1).
+    While { cond: Expr, body: Vec<Stmt> },
+    /// `for x in start end { ... }` — iterasi numerik [start, end), step 1.
+    /// Dibatasi evaluator (MAX_LOOP_ITERATIONS) agar deterministik (P1).
+    For { var: String, start: Expr, end: Expr, body: Vec<Stmt> },
 }
 
 #[derive(Debug, Clone, PartialEq)]

@@ -12,7 +12,7 @@ use crate::scene::{MaterialKind, MeshKind};
 /// Versi kanonik bahasa ADILang — sumber tunggal kebenaran untuk versi.
 /// Sinkron dengan: Cargo.toml, docs/LANGUAGE.md, docs/adilang.ebnf,
 /// docs/ADILANG_KNOWLEDGE.md, dan core/adilang_protocol.py (backend ADI).
-pub const VERSION: &str = "1.2.0";
+pub const VERSION: &str = "1.3.0";
 
 // ── SUMBER TUNGGAL KEBENARAN untuk builder mesh/material ────────────────────
 // Dipakai oleh: parser.rs `is_builder()`, eval.rs `apply_mesh()/apply_material()`,
@@ -114,7 +114,7 @@ pub fn registry_text() -> String {
             "entityprop: pos rot scale mesh material\n",
             "lightkind: point ambient\n",
             "declaration: world camera light entity let func on\n",
-            "statement: let if return\n",
+            "statement: let if return while for\n",
             "keyword: true false\n",
             "operator: + - * / % == != < > <= >= =\n",
             "delim: ( ) { } ,\n",
@@ -205,16 +205,16 @@ mod tests {
 
     #[test]
     fn registry_memuat_statement_dan_lightprop_type_enum() {
-        // Validasi grammar lengkap: statement (let if return) & enum lightprop.type
+        // Validasi grammar lengkap: statement (let if return while for) & enum lightprop.type
         let r = registry_text();
-        assert!(r.contains("statement: let if return"), "registry harus memuat kategori statement");
+        assert!(r.contains("statement: let if return while for"), "registry harus memuat kategori statement (incl. loop)");
         assert!(r.contains("lightprop.type: point ambient"), "registry harus memuat enum lightprop.type");
         // Baris dasar lightprop (type pos color intensity) juga wajib ada —
         // baris inilah yang pernah terhapus tak sengaja dan hanya ketahuan
         // oleh script checker; kunci dengan assertion ini di level cargo test.
         assert!(r.contains("lightprop: type pos color intensity"), "registry harus memuat kategori lightprop");
         // Tepat satu baris (tidak duplikat)
-        assert_eq!(r.matches("statement: let if return").count(), 1);
+        assert_eq!(r.matches("statement: let if return while for").count(), 1);
         assert_eq!(r.matches("lightprop.type: point ambient").count(), 1);
         assert_eq!(r.matches("lightprop: type pos color intensity").count(), 1);
     }

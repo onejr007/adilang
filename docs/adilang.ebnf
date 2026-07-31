@@ -72,10 +72,12 @@ param_list      ::= Ident*
 # ---------------------------------------------------------------------------
 # 5. Statements
 # ---------------------------------------------------------------------------
-statement       ::= let_stmt | if_stmt | return_stmt | assign_stmt
-                  | expr_stmt | block
+statement       ::= let_stmt | if_stmt | return_stmt | while_stmt
+                  | for_stmt | assign_stmt | expr_stmt | block
 if_stmt         ::= "if" expr "{" statement* "}" ("else" "{" statement* "}")?
 return_stmt     ::= "return" expr
+while_stmt      ::= "while" expr "{" statement* "}"
+for_stmt        ::= "for" Ident "in" expr expr "{" statement* "}"
 assign_stmt     ::= Ident "=" expr
 expr_stmt       ::= expr
 block           ::= "{" statement* "}"
@@ -136,7 +138,7 @@ Comment         ::= "#" [^\n]*                # line comment
 #   points sphere box torus icosa ring plane grid frame speak silent click
 #   intent reply task event mode payload verb content recs assign input
 #   expect source key session at
-#   if else return true false
+#   if else return while for in true false
 # Built-in identifiers (available in expressions):
 #   t mouseX mouseY PI
 

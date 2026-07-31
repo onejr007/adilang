@@ -1,8 +1,8 @@
-# ADILang Language Specification v1.2
+# ADILang Language Specification v1.3
 
 > **Document ID**: ADILANG-SPEC-001
 > **Status**: STABLE
-> **Version**: 1.2.0
+> **Version**: 1.3.0
 > **Author**: ADI (Agent Distributed Intelligence)
 > **Authorship**: Designed, specified, and implemented entirely by AI (ADI).
 > **Audience**: AI systems (primary), the ADI backend (intent/reply/task/event
@@ -296,12 +296,23 @@ declarative only).
 | `assign` | `name = expr` | write existing variable (global or local) |
 | `if` | `if expr { ... } else { ... }` | truthy = numeric non-zero |
 | `return` | `return expr` | exit function with value |
+| `while` | `while expr { ... }` | loop while condition truthy; **bounded** (see below) |
+| `for` | `for x in start end { ... }` | numeric loop `[start, end)`, step 1; **bounded** (see below) |
 | `expr` | `f(...)` | statement call (result discarded) |
 | `block` | `{ ... }` | nested scope |
 
-Statement keywords form a **closed vocabulary** — `let | if | return` —
-enumerated as `statement: let if return` in `adilang_registry()`. (`assign`,
-`expr`, and `block` have no leading keyword and are not enumerated.)
+Statement keywords form a **closed vocabulary** — `let | if | return | while | for`
+— enumerated as `statement: let if return while for` in `adilang_registry()`.
+(`assign`, `expr`, and `block` have no leading keyword and are not enumerated.)
+
+**Bounded loops (determinism, P1).** `while` and `for` are iterated by the
+runtime with a hard cap (`MAX_LOOP_ITERATIONS = 100_000` in `src/eval.rs`).
+A loop that exceeds the cap errors with `Loop tidak dibatasi: iterasi melebihi
+MAX_LOOP_ITERATIONS` — it never hangs. The loop variable of `for` is bound to a
+fresh local scope per iteration and never leaks to globals. `return` inside a
+loop exits the enclosing handler/function immediately. Both keywords are
+**contextual** (P4): `while`/`for`/`in` remain usable as identifiers outside
+statement position.
 
 ---
 
@@ -437,7 +448,20 @@ Exposed via wasm-bindgen (`src/wasm_api.rs`):
 
 ---
 
-## 13. Limitations (v1.2)
+## 12.1 Loop semantics (v1.3)
+
+- `while cond { ... }` re-evaluates `cond` each iteration; truthiness follows
+  the `if` rule (numeric non-zero / Bool).
+- `for x in start end { ... }` iterates while `x < end`, incrementing by `1`.
+  `start`/`end` may be expressions; both are evaluated once before the loop.
+- Scope: each iteration opens a fresh local scope (like a block). Mutations
+  to enclosing locals/globals via `assign` persist across iterations.
+- Determinism guarantee: the iteration cap makes any loop terminate — no
+  infinite loop can ever hang the runtime (P1).
+
+---
+
+## 13. Limitations (v1.3)
 
 - f64 numbers only; no string concat in expressions.
 - No arrays/structs/objects in the `world` module; state via `let` globals + entity

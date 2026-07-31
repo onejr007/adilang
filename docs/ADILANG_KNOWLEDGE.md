@@ -1,7 +1,7 @@
 # ADILang Knowledge Base (KB)
 
 > **Document ID**: ADILANG-KB-001
-> **Version**: 1.2.0
+> **Version**: 1.3.0
 > **Status**: STABLE
 > **Author**: ADI (Agent Distributed Intelligence)
 > **Purpose**: Self-contained learning corpus so **any AI** can learn ADILang from
@@ -162,7 +162,18 @@ material points (r g b) alpha?           # vertex cloud (gl.POINTS)
 # alpha optional; defaults 1.0
 ```
 
-### 4.5 Statements (inside func / handlers)
+#### 4.4b Bounded loops (v1.3.0 — Extension Protocol §11)
+
+- `while cond { ... }` — loop selama kondisi truthy (sama aturannya dengan `if`).
+- `for x in start end { ... }` — iterasi numerik `[start, end)`, step 1.
+- **Bounded (P1 determinism)**: runtime membatasi iterasi
+  (`MAX_LOOP_ITERATIONS = 100_000` di `src/eval.rs`). Loop yang melebihi batas
+  error `Loop tidak dibatasi` — tidak pernah hang.
+- Variabel `for` terikat ke scope lokal per iterasi — tidak bocor ke global.
+- `return` di dalam loop menghentikan handler/fungsi.
+- Kontekstual (P4): `while`/`for`/`in` tetap bisa jadi nama variabel.
+
+## 4.5 Statements (inside func / handlers)
 
 ```
 let x = 1 + 2 * 3
@@ -364,6 +375,7 @@ Follow the governance in Spec §11. Short version:
 **Changelog convention** (append here):
 
 ```
+## [1.3.0] — 2026-07 — loop statements while/for (bounded, deterministic)
 ## [1.2.0] — 2026-07 — per-axis scale, self-describing registry, spec↔impl fixes
 - Registry kini memvalidasi grammar lengkap: kategori `statement` (`let if return`)
   dan enum `lightprop.type` (`point ambient`) ditambahkan ke `registry_text()`,

@@ -31,6 +31,10 @@ impl Value {
     }
 }
 
+/// Batas iterasi loop (while/for) — menjamin determinisme (P1) dan mencegah
+/// hang. Nilai ekspresif cukup untuk animasi/frame tanpa risiko infinite loop.
+pub const MAX_LOOP_ITERATIONS: usize = 100_000;
+
 pub struct Interpreter {
     pub world: World,
     globals: HashMap<String, Value>,
@@ -400,6 +404,60 @@ impl Interpreter {
                 } else {
                     self.run_block(else_branch)
                 }
+            }
+            Stmt::While { cond, body } => {
+                // while cond { ... } — loop bounded (deterministik, P1).
+                // Setiap iterasi membuka scope lokal baru (seperti block biasa);
+                // `return` di dalam body menghentikan loop dan handler.
+                let mut iterations = 0usize;
+                loop {
+                    let c = self.eval_expr(cond)?;
+                    let truthy = match c {
+                        Value::Bool(b) => b,
+                        Value::Num(n) => n != 0.0,
+                        _ => false,
+                    };
+                    if !truthy {
+                        break;
+                    }
+                    if let Some(ret) = self.run_block(body)? {
+                        return Ok(Some(ret));
+                    }
+                    iterations += 1;
+                    if iterations > MAX_LOOP_ITERATIONS {
+                        return Err(format!(
+                            "Loop tidak dibatasi: iterasi melebihi MAX_LOOP_ITERATIONS ({MAX_LOOP_ITERATIONS})"
+                        ));
+                    }
+                }
+                Ok(None)
+            }
+            Stmt::For { var, start, end, body } => {
+                // for x in start end { ... } — iterasi numerik [start, end), step 1.
+                // Variabel loop di-bind ke scope lokal per-iterasi (tidak bocor).
+                let start_v = self.eval_expr(start)?.as_num()?;
+                let end_v = self.eval_expr(end)?.as_num()?;
+                let mut iterations = 0usize;
+                let mut i = start_v;
+                while i < end_v {
+                    self.scopes.push(HashMap::new());
+                    if let Some(frame) = self.scopes.last_mut() {
+                        frame.insert(var.clone(), Value::Num(i));
+                    }
+                    let result = self.run_block_inner(body);
+                    self.scopes.pop();
+                    if let Some(ret) = result? {
+                        return Ok(Some(ret));
+                    }
+                    i += 1.0;
+                    iterations += 1;
+                    if iterations > MAX_LOOP_ITERATIONS {
+                        return Err(format!(
+                            "Loop tidak dibatasi: iterasi melebihi MAX_LOOP_ITERATIONS ({MAX_LOOP_ITERATIONS})"
+                        ));
+                    }
+                }
+                Ok(None)
             }
         }
     }
@@ -1081,6 +1139,117 @@ mod tests {
         let body: Vec<Stmt> = handlers.iter().flat_map(|h| h.body.clone()).collect();
         interp.run_handler(Some("e".into()), &body).unwrap();
         assert_eq!(interp.world.entity("e").unwrap().transform.scale, [5.0, 5.0, 5.0]);
+    }
+
+    // ─── Loop while/for (v1.3.0, Extension Protocol §11) ─────────────────────
+
+    #[test]
+    fn eval_while_loop_bounded() {
+        let src = r#"
+            world "T" {
+                let total = 0
+                entity "e" {
+                    on frame {
+                        let i = 0
+                        while i < 5 {
+                            total = total + 1
+                            i = i + 1
+                        }
+                        scaleBy(i)
+                    }
+                }
+            }
+        "#;
+        let prog = parse(src).unwrap();
+        let mut interp = Interpreter::new("T".into());
+        interp.load(prog).unwrap();
+        let handlers = interp.world.handlers_for(crate::ast::EventKind::Frame, "e");
+        let body: Vec<Stmt> = handlers.iter().flat_map(|h| h.body.clone()).collect();
+        interp.run_handler(Some("e".into()), &body).unwrap();
+        let e = interp.world.entity("e").unwrap();
+        // while berjalan 5×: i = 5 → scaleBy(5)
+        assert_eq!(e.transform.scale, [5.0, 5.0, 5.0]);
+        assert_eq!(interp.globals.get("total"), Some(&Value::Num(5.0)));
+    }
+
+    #[test]
+    fn eval_for_loop_sums() {
+        let src = r#"
+            world "T" {
+                let sum = 0
+                entity "e" {
+                    on frame {
+                        for i in 1 6 {
+                            sum = sum + i
+                        }
+                        scaleBy(sum)
+                    }
+                }
+            }
+        "#;
+        let prog = parse(src).unwrap();
+        let mut interp = Interpreter::new("T".into());
+        interp.load(prog).unwrap();
+        let handlers = interp.world.handlers_for(crate::ast::EventKind::Frame, "e");
+        let body: Vec<Stmt> = handlers.iter().flat_map(|h| h.body.clone()).collect();
+        interp.run_handler(Some("e".into()), &body).unwrap();
+        let e = interp.world.entity("e").unwrap();
+        // 1+2+3+4+5 = 15
+        assert_eq!(e.transform.scale, [15.0, 15.0, 15.0]);
+        assert_eq!(interp.globals.get("sum"), Some(&Value::Num(15.0)));
+    }
+
+    #[test]
+    fn eval_for_loop_variable_scoped() {
+        // Variabel loop `i` TIDAK boleh bocor ke globals (scope lokal per iterasi).
+        let src = r#"
+            world "T" {
+                entity "e" {
+                    on frame {
+                        let acc = 0
+                        for i in 0 4 {
+                            acc = acc + i
+                        }
+                        scaleBy(acc)
+                    }
+                }
+            }
+        "#;
+        let prog = parse(src).unwrap();
+        let mut interp = Interpreter::new("T".into());
+        interp.load(prog).unwrap();
+        let handlers = interp.world.handlers_for(crate::ast::EventKind::Frame, "e");
+        let body: Vec<Stmt> = handlers.iter().flat_map(|h| h.body.clone()).collect();
+        interp.run_handler(Some("e".into()), &body).unwrap();
+        // 0+1+2+3 = 6
+        assert_eq!(interp.world.entity("e").unwrap().transform.scale, [6.0, 6.0, 6.0]);
+        assert!(!interp.globals.contains_key("i"), "variabel loop tidak boleh bocor ke global");
+    }
+
+    #[test]
+    fn eval_loop_guard_rejects_infinite_loop() {
+        // Determinisme (P1): loop tanpa kondisi berhenti harus ditolak setelah
+        // MAX_LOOP_ITERATIONS, bukan hang.
+        let src = r#"
+            world "T" {
+                entity "e" {
+                    on frame {
+                        while 1 {
+                            # no-op
+                        }
+                    }
+                }
+            }
+        "#;
+        let prog = parse(src).unwrap();
+        let mut interp = Interpreter::new("T".into());
+        interp.load(prog).unwrap();
+        let handlers = interp.world.handlers_for(crate::ast::EventKind::Frame, "e");
+        let body: Vec<Stmt> = handlers.iter().flat_map(|h| h.body.clone()).collect();
+        let res = interp.run_handler(Some("e".into()), &body);
+        assert!(res.is_err());
+        let msg = res.unwrap_err();
+        assert!(msg.contains("MAX_LOOP_ITERATIONS"), "error harus menyebut batas iterasi: {msg}");
     }
 
     #[test]

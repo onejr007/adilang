@@ -245,6 +245,30 @@ impl Parser {
                     let value = self.parse_expr()?;
                     Ok(Stmt::Return(value))
                 }
+                "while" => {
+                    // while cond { ... } — loop bounded (deterministik, P1)
+                    self.advance();
+                    let cond = self.parse_expr()?;
+                    let body = self.parse_block()?;
+                    Ok(Stmt::While { cond, body })
+                }
+                "for" => {
+                    // for x in start end { ... } — iterasi [start, end), step 1
+                    self.advance();
+                    let var = self.expect_ident("nama variabel loop")?;
+                    if self.peek() == &TokKind::Ident("in".to_string()) {
+                        self.advance();
+                    } else {
+                        return Err(format!(
+                            "Ekspektasi 'in' pada for di baris {}",
+                            self.line()
+                        ));
+                    }
+                    let start = self.parse_expr()?;
+                    let end = self.parse_expr()?;
+                    let body = self.parse_block()?;
+                    Ok(Stmt::For { var, start, end, body })
+                }
                 "on" => {
                     // Handler hanya diizinkan di level entity / top-level, BUKAN
                     // di dalam statement (spec §4.5, EBNF handler ::= "on" event_name ...).
@@ -499,5 +523,191 @@ setPos(2.1 * cos(a), 0.35 * sin(2.3 * t), 2.1 * sin(a)) } } }";
         assert!(res.is_err(), "handler di dalam statement harus ditolak");
         let msg = res.unwrap_err();
         assert!(msg.contains("on"), "error harus menyebut 'on': {msg}");
+    }
+
+    #[test]
+    fn parse_while_loop() {
+        // v1.3.0 (Extension Protocol §11): while cond { ... } — loop bounded.
+        let src = r#"
+            world "T" {
+                entity "e" {
+                    on frame {
+                        let i = 0
+                        while i < 10 {
+                            i = i + 1
+                        }
+                    }
+                }
+            }
+        "#;
+        let prog = parse(src).expect("while loop harus di-parse");
+        assert_eq!(prog.items.len(), 1);
+    }
+
+    #[test]
+    fn parse_for_loop() {
+        // v1.3.0 (Extension Protocol §11): for x in start end { ... }
+        let src = r#"
+            world "T" {
+                entity "e" {
+                    on frame {
+                        for i in 0 10 {
+                            rotate(0.1, (0 1 0))
+                        }
+                    }
+                }
+            }
+        "#;
+        let prog = parse(src).expect("for loop harus di-parse");
+        assert_eq!(prog.items.len(), 1);
+    }
+
+    #[test]
+    fn parse_for_requires_in() {
+        // `for` tanpa 'in' harus error (bukan salah parse diam-diam).
+        let src = "world \"w\" { entity \"e\" { on frame { for i 0 10 { } } } }";
+        let res = parse(src);
+        assert!(res.is_err(), "for tanpa 'in' harus ditolak");
+        let msg = res.unwrap_err();
+        assert!(msg.contains("in"), "error harus menyebut 'in': {msg}");
+    }
+
+    // ═══════════════════════════════════════════════════════════════════════
+    // FUZZ / BENCHMARK (P3.10, P1 determinism)
+    // ═══════════════════════════════════════════════════════════════════════
+    // LCG deterministik (tanpa RNG global, tanpa dependensi) — seed tetap
+    // membuat fuzz REPRODUCIBLE: kegagalan yang sama selalu terulang.
+    struct Lcg(u64);
+    impl Lcg {
+        fn new(seed: u64) -> Self {
+            Self(seed)
+        }
+        fn next(&mut self) -> u64 {
+            // Numerical Recipes LCG — cukup untuk fuzz, deterministik
+            self.0 = self
+                .0
+                .wrapping_mul(6364136223846793005)
+                .wrapping_add(1442695040888963407);
+            self.0 >> 33
+        }
+        fn range(&mut self, lo: usize, hi: usize) -> usize {
+            if hi <= lo {
+                lo
+            } else {
+                lo + (self.next() as usize) % (hi - lo)
+            }
+        }
+        fn num(&mut self, scale: f64) -> f64 {
+            let v = (self.next() % 1000) as f64 / 1000.0;
+            (v * scale * 100.0).round() / 100.0
+        }
+    }
+
+    /// Bangun world ADILang acak-yet-valid dari registry tertutup (P6).
+    /// Semua builder diambil dari MESH_BUILDERS/MATERIAL_BUILDERS (sumber
+    /// tunggal) sehingga hasilnya dijamin berada dalam kosakata bahasa.
+    fn random_world(rng: &mut Lcg) -> String {
+        use crate::registry;
+        let meshes: Vec<&str> = registry::mesh_builder_names().collect();
+        let mats: Vec<&str> = registry::material_builder_names().collect();
+        let transforms = [
+            "move", "setPos", "setScale", "scaleBy", "rotate", "setColor", "setAlpha",
+        ];
+        let math1 = ["sin", "cos", "tan", "sqrt", "abs", "floor"];
+
+        let mut s = String::from("world \"fuzz\" {\n");
+        s.push_str("  camera \"cam\" { pos (0 1.6 6) look (0 0 0) fov 55 }\n");
+        s.push_str("  light \"key\" { type point pos (4 5 3) color (1 0.95 0.9) intensity 1.4 }\n");
+        let n_entities = rng.range(1, 4);
+        for e in 0..n_entities {
+            s.push_str(&format!("  entity \"e{e}\" {{\n"));
+            s.push_str("    pos (0 0 0)\n");
+            let m = meshes[rng.range(0, meshes.len())];
+            let radius = rng.range(1, 5);
+            let seg = rng.range(3, 8);
+            s.push_str(&format!("    mesh {m} {{ radius {radius} segments {seg} }}\n"));
+            let mat = mats[rng.range(0, mats.len())];
+            let (r, g, b) = (rng.num(1.0), rng.num(1.0), rng.num(1.0));
+            let alpha = rng.range(0, 2);
+            s.push_str(&format!("    material {mat} ({r} {g} {b}) {alpha}\n"));
+            s.push_str("    on frame {\n");
+            // transform acak dari registry transform
+            let tf = transforms[rng.range(0, transforms.len())];
+            let sp = rng.num(1.0);
+            let (ax, ay, az) = (rng.num(1.0), rng.num(1.0), rng.num(1.0));
+            s.push_str(&format!("      {tf}({sp} * t, ({ax} {ay} {az}))\n"));
+            // math 1-arg kadang disertakan
+            if rng.range(0, 3) == 0 {
+                let fn1 = math1[rng.range(0, math1.len())];
+                s.push_str(&format!("      setScale(1 + 0.05 * {fn1}({sp} * t))\n"));
+            }
+            // loop bounded (v1.3.0) kadang disertakan
+            if rng.range(0, 3) == 0 {
+                s.push_str("      let i = 0\n");
+                s.push_str("      while i < 3 {\n");
+                s.push_str("        i = i + 1\n");
+                s.push_str("      }\n");
+            }
+            if rng.range(0, 3) == 0 {
+                s.push_str("      for k in 0 2 {\n");
+                s.push_str("        rotate(0.1, (0 1 0))\n");
+                s.push_str("      }\n");
+            }
+            s.push_str("    }\n");
+            s.push_str("  }\n");
+        }
+        s.push_str("}\n");
+        s
+    }
+
+    #[test]
+    fn fuzz_random_worlds_selalu_valid_dan_reproducible() {
+        // P3.10 — bukti determinisme (P1): semua world acak dari registry harus
+        // valid, dan seed yang sama menghasilkan urutan parse yang sama.
+        let mut rng = Lcg::new(0xAD1_2026);
+        for _ in 0..300 {
+            let src = random_world(&mut rng);
+            let res = parse(&src);
+            assert!(
+                res.is_ok(),
+                "world acak harus valid (P1 determinism):\n{src}\nerr: {:?}",
+                res.err()
+            );
+        }
+        // Reproducibility: seed sama → generator menghasilkan source yang sama
+        let mut a = Lcg::new(7);
+        let mut b = Lcg::new(7);
+        for _ in 0..50 {
+            assert_eq!(random_world(&mut a), random_world(&mut b), "fuzz harus reproducible");
+        }
+    }
+
+    #[test]
+    fn fuzz_mutasi_tidak_pernah_panic() {
+        // P1 determinism — parser TIDAK boleh panic pada input apa pun:
+        // hasil Ok atau Err sama-sama sah, yang penting tidak crash.
+        let base = include_str!("../worlds/default.adi");
+        let base: Vec<char> = base.chars().collect();
+        let alphabet: Vec<char> = "(){}\",.=+-*/%<>_0123456789abcdefghijklmnopqrstuvwxyz "
+            .chars()
+            .collect();
+        let mut rng = Lcg::new(0xC0FFEE);
+        for _ in 0..500 {
+            let mut chars = base.clone();
+            for _ in 0..rng.range(1, 8) {
+                let idx = rng.range(0, chars.len().max(1));
+                match rng.range(0, 3) {
+                    0 => chars[idx] = alphabet[rng.range(0, alphabet.len())],
+                    1 => chars.insert(idx, alphabet[rng.range(0, alphabet.len())]),
+                    _ => {
+                        if chars.len() > 1 {
+                            chars.remove(idx);
+                        }
+                    }
+                }
+            }
+            let mutated: String = chars.into_iter().collect();
+            let _ = parse(&mutated); // Ok atau Err — tidak boleh panic
+        }
     }
 }
