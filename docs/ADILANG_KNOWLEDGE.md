@@ -473,5 +473,54 @@ Follow the governance in Spec §11. Short version:
 - Backend tooling (main repo): `core/adilang_protocol.py` (encoders/validators,
   incl. `encode_fact_memory`), `core/adilang_ir_store.py` (`record_fact_memory`),
   `core/adilang_stream_buffer.py` (incremental streaming parser),
-  `scripts/adilang_check.py` (linter mirror).
+   `scripts/adilang_check.py` (linter mirror).
+
+---
+
+## 10. ADI System Intelligence Integration (v6.14.0)
+
+The ADI system that embeds ADILang has three intelligence capabilities that
+synergize with ADILang's memory and protocol modules. These are **backend
+infrastructure** — they do NOT change the ADILang grammar or introduce new
+protocol keys, but they describe how the ecosystem uses ADILang blocks at runtime:
+
+### 10.1 Semantic Vector Search (`core/memory.py`)
+- `_semantic_search()` helper: fetches encrypted ChromaDB documents via `.get()`,
+  decrypts them, embeds both query and docs via `ADISemanticEmbeddingFunction`,
+  and ranks by **cosine similarity**.
+- `search_knowledge_base()` and `get_relevant_history()` now use **semantic
+  vector search** instead of keyword/recency matching. `get_relevant_history`
+  blends similarity (x0.70) + importance score (x0.30).
+- Search results include a `confidence` score (0.0-1.0) for ranking.
+- Pipeline (`core/crew.py:1909`) uses `get_relevant_history` for context injection
+  into the CrewAI system prompt — messages are retrieved by **semantic relevance**
+  to the current query, not just recency.
+
+### 10.2 Provider RL Reward Persistence (`core/adaptive_ml.py` + `core/llm_factory.py`)
+- `ADIAdaptiveMLEngine._provider_rewards` persist to Redis (key
+  `adi:ml:provider_rewards`) via `get_provider_rewards`/`set_provider_rewards`
+  in `app/redis_client.py`.
+- `_load_rewards()` runs on engine init (survives restart).
+- `LLMFactory.report_success`/`report_failure` are wired to
+  `update_reinforcement_reward()` — the RL system is **functional in production**,
+  not just tests. Success: `reward = 1 - latency/15`; Failure: `reward = -1`.
+- `get_best_provider_recommendation()` uses persisted rewards for provider selection.
+
+### 10.3 LLM-Summarized Memory Consolidation (`core/memory.py`)
+- `_maybe_consolidate_memory()` triggers every 20 user messages.
+- `_summarize_conversation_batch()` calls litellm (Groq/OpenRouter) to produce
+  a 1-2 sentence summary (max_tokens=150, timeout=10s).
+- Fallbacks: keyword extraction -> string concatenation (never blocks).
+- Summaries stored as KB documents (`category=consolidated_chat`).
+
+### 10.4 Relationship to ADILang Memory Module
+- ADILang `memory` block: `key topic fact confidence source at` — structured fact
+  exchange (used by recall loop: `extract_facts -> record_memory -> get_memory_facts
+  -> recall_memory_context -> inject system prompt`).
+- ADILang `event "fact_memory"`: short-term trace (sementara) between agents.
+- Semantic search operates on these stored blocks — it finds relevant `memory`
+  and `event "fact_memory"` documents by vector similarity, improving the precision
+  of the recall loop.
+- LLM summarization consolidates low-importance `event` traces into compact
+  KB summaries, keeping context efficient for future vector searches.
 - Build: `cargo test` (native), `wasm-pack build --target web` (WASM).

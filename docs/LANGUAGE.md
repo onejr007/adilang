@@ -768,3 +768,30 @@ categories (P6).
   documents, not one. Processors read one module per source string.
 - `memory`/`plan` (v1.5.0) are backend protocol modules exactly like the other
   four: the Rust/WASM world runtime does not implement them.
+
+---
+
+## 17. ADI System Intelligence Integration (v6.14.0)
+
+The ADI ecosystem that *uses* ADILang has three intelligence capabilities
+that operate on top of the ADILang protocol but do **not** change the grammar
+or introduce new keys (additive-only):
+
+### 17.1 Semantic Vector Search
+`core/memory.py` implements `_semantic_search()`: decrypts ChromaDB documents,
+embeds query + docs with `ADISemanticEmbeddingFunction`, ranks by cosine
+similarity. `search_knowledge_base()` and `get_relevant_history()` replace
+keyword/recency matching. Results include `confidence` scores. The recall loop
+finds relevant `memory` and `event "fact_memory"` blocks by semantic relevance.
+
+### 17.2 Provider RL Reward Persistence
+`core/adaptive_ml.py` persists provider RL rewards to Redis
+(`adi:ml:provider_rewards`), reloaded on restart.
+`core/llm_factory.py` `report_success`/`report_failure` are wired to
+`update_reinforcement_reward()` — the RL system is functional in production.
+
+### 17.3 LLM-Summarized Memory Consolidation
+`_maybe_consolidate_memory()` (every 20 user messages) calls
+`_summarize_conversation_batch()` via litellm (Groq/OpenRouter) to produce
+1-2 sentence summaries. Fallbacks: keyword extraction, then concatenation.
+Summaries stored as KB documents (`category=consolidated_chat`).
