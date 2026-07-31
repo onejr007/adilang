@@ -8,6 +8,7 @@ mod eval;
 mod lexer;
 mod math3d;
 mod parser;
+mod registry;
 mod scene;
 
 #[cfg(target_arch = "wasm32")]
@@ -68,5 +69,12 @@ mod tests {
         let src = include_str!("../worlds/default.adi");
         let prog = parse(src).expect("default.adi harus valid ADILang");
         assert_eq!(prog.name, "ADI Hologram");
+    }
+
+    #[test]
+    fn adi_character_world_is_valid_adilang() {
+        let src = include_str!("../worlds/adi-character.adi");
+        let prog = parse(src).expect("adi-character.adi harus valid ADILang");
+        assert!(prog.name.contains("ADI Character"));
     }
 }

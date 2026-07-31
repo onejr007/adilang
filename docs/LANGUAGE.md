@@ -1,8 +1,8 @@
-# ADILang Language Specification v1.1
+# ADILang Language Specification v1.2
 
 > **Document ID**: ADILANG-SPEC-001
 > **Status**: STABLE
-> **Version**: 1.1.0
+> **Version**: 1.2.0
 > **Author**: ADI (Agent Distributed Intelligence)
 > **Authorship**: Designed, specified, and implemented entirely by AI (ADI).
 > **Audience**: AI systems (primary), the ADI backend (intent/reply/task/event
@@ -74,8 +74,8 @@ principles apply to *every* module (protocol modules included).
    `func` and event handlers. Protocol modules are pure declarative key/value blocks.
 6. **P6 — Self-describing.** The full vocabulary (mesh builders, material builders,
    functions, properties, protocol keys) is a closed registry (Section 8–10) that the
-   runtime can enumerate. An AI can query `adilang_version()` and, in future, a
-   registry API.
+   runtime can enumerate. An AI can query `adilang_version()` and `adilang_registry()`
+   to inspect the complete closed vocabulary without reading documentation.
 7. **P7 — Hot-reloadable.** The entire world is a string of text. The runtime exposes
    `adilang_load(source)` so any AI can regenerate the world live without deployment.
 8. **P8 — Stateless-by-default.** Evaluators keep world state in the scene model;
@@ -87,7 +87,7 @@ principles apply to *every* module (protocol modules included).
 ## 2. Notation & Conformance
 
 - **Must / Should / May** carry RFC 2119 meanings.
-- A document **conforms** to ADILang v1.1 if it is parseable by the normative grammar
+- A document **conforms** to ADILang v1.2 if it is parseable by the normative grammar
   and satisfies every **Must** in this specification.
 - **Module conformance.** A *module block* conforms if it is parseable by its module
   grammar rule (Section 4.5). A module is *implemented* when a runtime can parse,
@@ -255,6 +255,8 @@ Clamping at render time: segments `[2,64]`, count `[2,128]`.
 - `type ambient` → only `color`/`intensity` used; `pos` ignored.
 - Renderer uses the **first point light** as the lighting reference and the
   **ambient** light (or default) for ambient factor.
+- The `type` prop takes a **closed enum** (`point | ambient`), enumerated as
+  `lightprop.type` in `adilang_registry()` (same value set as `lightkind`).
 
 ---
 
@@ -268,7 +270,7 @@ The evaluator's value domain is closed:
 | `Str` | `"..."` | metadata / ids |
 | `Bool` | `true`, `false` | conditions |
 | `Tuple` | `(x y z)` | positional vector; all elements numeric |
-| `Null` | — | returned by `return`-less funcs, void calls |
+| `Null` | — | returned by void calls, funcs with no trailing expression |
 
 **No string concatenation. No arrays/structs in expressions. No object literals.**
 (World-module scope; protocol modules add `String[]` arrays. See Extension Protocol.)
@@ -297,6 +299,10 @@ declarative only).
 | `expr` | `f(...)` | statement call (result discarded) |
 | `block` | `{ ... }` | nested scope |
 
+Statement keywords form a **closed vocabulary** — `let | if | return` —
+enumerated as `statement: let if return` in `adilang_registry()`. (`assign`,
+`expr`, and `block` have no leading keyword and are not enumerated.)
+
 ---
 
 ## 8. Built-in Function Registry
@@ -307,8 +313,8 @@ declarative only).
 |---|---|---|
 | `move` | `move(dx, dy, dz)` | translate by delta |
 | `setPos` | `setPos(x, y, z)` | absolute position |
-| `setScale` | `setScale(s)` | absolute uniform scale |
-| `scaleBy` | `scaleBy(f)` | scale *= f |
+| `setScale` | `setScale(s)` *or* `setScale(x, y, z)` | absolute scale; 1 arg = uniform `[s,s,s]`, 3 args = per-axis (2 args = `x,y` with `z=1`) |
+| `scaleBy` | `scaleBy(f)` *or* `scaleBy(x, y, z)` | scale *= factor; 1 arg = uniform, 3 args = per-axis |
 | `rotate` | `rotate(angle, axis)` | **accumulative** euler spin: `rot += angle*axis` |
 | `setColor` | `setColor(r, g, b)` | absolute rgb (keeps alpha) |
 | `setAlpha` | `setAlpha(a)` | absolute alpha |
@@ -327,8 +333,11 @@ Calling a transform function outside an entity handler is a **runtime error**.
 
 ### 8.3 User functions
 `func name(p1 p2 ...) { ... }` — callable from anywhere; params are positional;
-defaults to `Null` when omitted. Reentrancy: globals are snapshotted and restored
-around a call (simple, deterministic).
+defaults to `Null` when omitted. **Implicit return**: if the body ends without an
+explicit `return`, the value of the last expression statement is returned (matching
+the KB examples, e.g. `func spin_speed() { 0.4 }`); if the body has no trailing
+expression, `Null` is returned. An explicit `return` always takes precedence.
+Reentrancy: globals are snapshotted and restored around a call (simple, deterministic).
 
 ---
 
@@ -424,10 +433,11 @@ Exposed via wasm-bindgen (`src/wasm_api.rs`):
 | `adilang_silent()` | `Result<(), String>` | fire `silent` |
 | `adilang_debug_count()` | `usize` | entity count (diagnostics) |
 | `adilang_version()` | `String` | version string |
+| `adilang_registry()` | `String` | closed-vocabulary enumeration (P6) |
 
 ---
 
-## 13. Limitations (v1.1)
+## 13. Limitations (v1.2)
 
 - f64 numbers only; no string concat in expressions.
 - No arrays/structs/objects in the `world` module; state via `let` globals + entity
@@ -435,7 +445,8 @@ Exposed via wasm-bindgen (`src/wasm_api.rs`):
 - No iteration/while loops (only bounded, deterministic `func` recursion if any).
 - Tuples are homogeneous numeric vectors (position/color), not general values.
 - Single world per load; no multi-world scene graphs yet.
-- `points` builder is recognized by the parser but currently renders as `solid`.
+- `points` material renders the mesh's vertex cloud (gl.POINTS); solid meshes keep
+  their triangle geometry.
 - Protocol modules are processed by the ADI backend and by consuming AIs; the Rust
   WASM runtime implements the `world` module only (unknown top-level modules are
   rejected by the world parser — they are not its concern).

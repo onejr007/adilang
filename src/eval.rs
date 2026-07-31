@@ -34,7 +34,14 @@ impl Value {
 pub struct Interpreter {
     pub world: World,
     globals: HashMap<String, Value>,
+    /// Stack scope lokal (handler / block / frame fungsi).
+    /// `let` di dalam scope bind ke scope terdalam; assignment menarget
+    /// scope TERDEKAT yang memiliki nama (lokal dulu, lalu global).
+    /// Lihat spec LANGUAGE.md §7 dan KB §6.
+    scopes: Vec<HashMap<String, Value>>,
     functions: HashMap<String, FuncDef>,
+    /// Nilai ekspresi terakhir yang dievaluasi (untuk implicit return fungsi).
+    last_expr: Option<Value>,
     pub t: f64,
     pub mouse_x: f64,
     pub mouse_y: f64,
@@ -46,7 +53,9 @@ impl Interpreter {
         Self {
             world: World::new(name),
             globals: HashMap::new(),
+            scopes: Vec::new(),
             functions: HashMap::new(),
+            last_expr: None,
             t: 0.0,
             mouse_x: 0.0,
             mouse_y: 0.0,
@@ -58,6 +67,7 @@ impl Interpreter {
     pub fn load(&mut self, program: crate::ast::Program) -> Result<(), String> {
         self.world = World::new(program.name.clone());
         self.globals.clear();
+        self.scopes.clear();
         self.functions.clear();
 
         // Pass 1: kumpulkan fungsi & let global
@@ -160,7 +170,10 @@ impl Interpreter {
         match p.name.as_str() {
             "pos" => e.transform.pos = self.eval_vec3(&p.value)?,
             "rot" => e.transform.rot = self.eval_vec3(&p.value)?,
-            "scale" => e.transform.scale = self.eval_expr(&p.value)?.as_num()?,
+            "scale" => {
+                let n = self.eval_expr(&p.value)?.as_num()?;
+                e.transform.scale = [n, n, n]
+            }
             "mesh" => self.apply_mesh(e, &p.value)?,
             "material" => self.apply_material(e, &p.value)?,
             _ => {}
@@ -173,7 +186,23 @@ impl Interpreter {
             Expr::Call { name, args, props } => (name.clone(), args.clone(), props.clone()),
             other => return Err(format!("mesh harus berupa builder, dapat {other:?}")),
         };
-        let mut mp = MeshParams::default();
+        // SUMBER TUNGGAL KEBENARAN kosakata mesh = registry.rs (tabel
+        // MESH_BUILDERS). Tidak ada match literal di sini — tambah builder baru
+        // cukup di registry.rs, evaluator otomatis ikut (P6, anti-drift).
+        let kind = match crate::registry::mesh_kind(&name) {
+            Some(k) => k,
+            None => return Err(format!("Mesh builder tidak dikenal '{name}'")),
+        };
+        // Default per builder (spec §5.2 / KB §4.3) — sisanya dari MeshParams::default().
+        let mut mp = match kind {
+            MeshKind::Sphere => MeshParams { radius: 1.0, segments: 3.0, ..MeshParams::default() },
+            MeshKind::Box => MeshParams { size: 1.0, ..MeshParams::default() },
+            MeshKind::Torus => MeshParams { radius: 1.0, tube: 0.1, ..MeshParams::default() },
+            MeshKind::Icosa => MeshParams { radius: 1.0, inner: 1.0, ..MeshParams::default() },
+            MeshKind::Ring => MeshParams { radius: 1.0, tube: 0.02, ..MeshParams::default() },
+            MeshKind::Plane => MeshParams { size: 10.0, ..MeshParams::default() },
+            MeshKind::Grid => MeshParams { size: 20.0, count: 20.0, ..MeshParams::default() },
+        };
         if let Some(props) = props {
             for p in props {
                 match p.name.as_str() {
@@ -187,23 +216,25 @@ impl Interpreter {
                 }
             }
         }
-        // argumen positional
+        // Argumen positional per builder (KB §4.3):
+        // box/plane/grid → size; sphere → radius(,segments);
+        // torus/ring → radius, tube; icosa → radius, inner; grid → size, count.
         if let Some(a0) = args.first() {
-            mp.radius = self.eval_expr(a0)?.as_num()?;
+            let v0 = self.eval_expr(a0)?.as_num()?;
+            match kind {
+                MeshKind::Box | MeshKind::Plane | MeshKind::Grid => mp.size = v0,
+                _ => mp.radius = v0,
+            }
         }
         if let Some(a1) = args.get(1) {
-            mp.tube = self.eval_expr(a1)?.as_num()?;
+            let v1 = self.eval_expr(a1)?.as_num()?;
+            match kind {
+                MeshKind::Icosa => mp.inner = v1,
+                MeshKind::Grid => mp.count = v1,
+                MeshKind::Sphere => mp.segments = v1,
+                _ => mp.tube = v1,
+            }
         }
-        let kind = match name.as_str() {
-            "sphere" => MeshKind::Sphere,
-            "box" => MeshKind::Box,
-            "torus" => MeshKind::Torus,
-            "icosa" => MeshKind::Icosa,
-            "ring" => MeshKind::Ring,
-            "plane" => MeshKind::Plane,
-            "grid" => MeshKind::Grid,
-            other => return Err(format!("Mesh builder tidak dikenal '{other}'")),
-        };
         e.mesh = kind;
         e.mesh_params = mp;
         Ok(())
@@ -214,12 +245,12 @@ impl Interpreter {
             Expr::Call { name, args, .. } => (name.clone(), args.clone()),
             other => return Err(format!("material harus berupa builder, dapat {other:?}")),
         };
-        let kind = match name.as_str() {
-            "solid" => MaterialKind::Solid,
-            "wire" => MaterialKind::Wire,
-            "glow" => MaterialKind::Glow,
-            "points" => MaterialKind::Solid,
-            other => return Err(format!("Material builder tidak dikenal '{other}'")),
+        // SUMBER TUNGGAL KEBENARAN kosakata material = registry.rs (tabel
+        // MATERIAL_BUILDERS). Tidak ada match literal di sini — tambah builder
+        // baru cukup di registry.rs, evaluator otomatis ikut (P6, anti-drift).
+        let kind = match crate::registry::material_kind(&name) {
+            Some(k) => k,
+            None => return Err(format!("Material builder tidak dikenal '{name}'")),
         };
         e.material = kind;
         if let Some(c) = args.first() {
@@ -251,11 +282,20 @@ impl Interpreter {
                     "mouseX" => Ok(Value::Num(self.mouse_x)),
                     "mouseY" => Ok(Value::Num(self.mouse_y)),
                     "PI" => Ok(Value::Num(std::f64::consts::PI)),
-                    _ => self
-                        .globals
-                        .get(name)
-                        .cloned()
-                        .ok_or_else(|| format!("Variabel tidak dikenal '{name}'")),
+                    _ => {
+                        // Builtins tetap prioritas (tidak bisa di-shadow oleh local
+                        // `let t = ...` — perilaku sengaja dipertahankan).
+                        // Lalu scope lokal terdalam → global.
+                        for scope in self.scopes.iter().rev() {
+                            if let Some(v) = scope.get(name) {
+                                return Ok(v.clone());
+                            }
+                        }
+                        self.globals
+                            .get(name)
+                            .cloned()
+                            .ok_or_else(|| format!("Variabel tidak dikenal '{name}'"))
+                    }
                 }
             }
             Expr::UnaryMinus(inner) => Ok(Value::Num(-self.eval_expr(inner)?.as_num()?)),
@@ -296,6 +336,16 @@ impl Interpreter {
 
     // ── Statement runner ──
     pub fn run_block(&mut self, stmts: &[Stmt]) -> Result<Option<Value>, String> {
+        // Setiap blok (body handler, body fungsi, branch if/else, blok bersarang)
+        // membuka scope lokal BARU — `let` di dalamnya bersifat lokal per blok
+        // (spec LANGUAGE.md §7; KB §6 "handler/block let = local").
+        self.scopes.push(HashMap::new());
+        let result = self.run_block_inner(stmts);
+        self.scopes.pop();
+        result
+    }
+
+    fn run_block_inner(&mut self, stmts: &[Stmt]) -> Result<Option<Value>, String> {
         for s in stmts {
             if let Some(ret) = self.run_stmt(s)? {
                 return Ok(Some(ret));
@@ -308,16 +358,32 @@ impl Interpreter {
         match s {
             Stmt::Let { name, value } => {
                 let v = self.eval_expr(value)?;
-                self.globals.insert(name.clone(), v);
+                // `let` bind ke scope terdalam (lokal); shadowing global.
+                // Fallback defensif ke globals bila tidak ada scope aktif.
+                if let Some(scope) = self.scopes.last_mut() {
+                    scope.insert(name.clone(), v);
+                } else {
+                    self.globals.insert(name.clone(), v);
+                }
                 Ok(None)
             }
             Stmt::Assign { name, value } => {
                 let v = self.eval_expr(value)?;
-                self.globals.insert(name.clone(), v);
-                Ok(None)
+                // Assignment menarget scope TERDEKAT yang memiliki nama tsb
+                // (lokal dulu, lalu global). Target tidak dikenal = error (KB §6).
+                match self.find_assignable_scope(name) {
+                    Some(scope) => {
+                        scope.insert(name.clone(), v);
+                        Ok(None)
+                    }
+                    None => Err(format!("Variabel tidak dikenal '{name}'")),
+                }
             }
             Stmt::ExprStmt(e) => {
-                self.eval_expr(e)?;
+                let v = self.eval_expr(e)?;
+                // Rekam nilai ekspresi terakhir → dipakai untuk implicit return
+                // fungsi bila body berakhir tanpa `return` eksplisit (KB §4.1).
+                self.last_expr = Some(v);
                 Ok(None)
             }
             Stmt::Return(e) => Ok(Some(self.eval_expr(e)?)),
@@ -368,15 +434,37 @@ impl Interpreter {
             }
             "scaleBy" => {
                 let e = self.current_entity_mut()?;
-                if let Some(a) = args.first() {
-                    e.transform.scale *= a.as_num()?;
+                // 1 arg = uniform (backward compat); 3 arg = per-axis; hilang = 1.0
+                if args.len() < 2 {
+                    let a = args.get(0).map(|a| a.as_num()).transpose()?.unwrap_or(1.0);
+                    e.transform.scale = [
+                        e.transform.scale[0] * a,
+                        e.transform.scale[1] * a,
+                        e.transform.scale[2] * a,
+                    ];
+                } else {
+                    let a = args.get(0).map(|a| a.as_num()).transpose()?.unwrap_or(1.0);
+                    let b = args.get(1).map(|a| a.as_num()).transpose()?.unwrap_or(1.0);
+                    let c = args.get(2).map(|a| a.as_num()).transpose()?.unwrap_or(1.0);
+                    e.transform.scale = [
+                        e.transform.scale[0] * a,
+                        e.transform.scale[1] * b,
+                        e.transform.scale[2] * c,
+                    ];
                 }
                 Ok(Value::Null)
             }
             "setScale" => {
                 let e = self.current_entity_mut()?;
-                if let Some(a) = args.first() {
-                    e.transform.scale = a.as_num()?;
+                // 1 arg = uniform (backward compat); 2 arg = x,y (z=1); 3 arg = per-axis
+                if args.len() < 2 {
+                    let a = args.get(0).map(|a| a.as_num()).transpose()?.unwrap_or(1.0);
+                    e.transform.scale = [a, a, a];
+                } else {
+                    let a = args.get(0).map(|a| a.as_num()).transpose()?.unwrap_or(1.0);
+                    let b = args.get(1).map(|a| a.as_num()).transpose()?.unwrap_or(1.0);
+                    let c = args.get(2).map(|a| a.as_num()).transpose()?.unwrap_or(1.0);
+                    e.transform.scale = [a, b, c];
                 }
                 Ok(Value::Null)
             }
@@ -455,19 +543,52 @@ impl Interpreter {
             _ => {
                 if let Some(f) = self.functions.get(name).cloned() {
                     // call user function
+                    // Reentrancy (spec §8.3): globals di-snapshot & di-restore
+                    // setelah pemanggilan agar panggilan fungsi deterministik.
                     let saved = self.globals.clone();
+                    // Simpan last_expr caller, reset untuk body fungsi.
+                    let saved_last = self.last_expr.take();
+                    // Frame scope baru untuk params — body fungsi membuka scope
+                    // lokal sendiri via run_block, jadi `let` di body tetap lokal.
+                    self.scopes.push(HashMap::new());
                     for (i, p) in f.params.iter().enumerate() {
                         let v = args.get(i).cloned().unwrap_or(Value::Null);
-                        self.globals.insert(p.clone(), v);
+                        if let Some(frame) = self.scopes.last_mut() {
+                            frame.insert(p.clone(), v);
+                        }
                     }
-                    let result = self.run_block(&f.body)?;
+                    let result = self.run_block(&f.body);
+                    self.scopes.pop();
                     self.globals = saved;
-                    Ok(result.unwrap_or(Value::Null))
+                    let ret = match result {
+                        Ok(Some(v)) => v, // return eksplisit
+                        Ok(None) => self.last_expr.take().unwrap_or(Value::Null), // implicit return
+                        Err(e) => {
+                            self.last_expr = saved_last;
+                            return Err(e);
+                        }
+                    };
+                    self.last_expr = saved_last;
+                    Ok(ret)
                 } else {
                     Err(format!("Fungsi tidak dikenal '{name}'"))
                 }
             }
         }
+    }
+
+    /// Cari scope TERDEKAT (lokal terdalam → global) yang memiliki nama tsb.
+    /// Assignment menarget scope ini; `None` = nama tidak dikenal → error.
+    fn find_assignable_scope(&mut self, name: &str) -> Option<&mut HashMap<String, Value>> {
+        for scope in self.scopes.iter_mut().rev() {
+            if scope.contains_key(name) {
+                return Some(scope);
+            }
+        }
+        if self.globals.contains_key(name) {
+            return Some(&mut self.globals);
+        }
+        None
     }
 
     fn current_entity_mut(&mut self) -> Result<&mut EntityState, String> {
@@ -531,7 +652,7 @@ mod tests {
         interp.run_handler(Some("core".into()), &body).unwrap();
         let e = interp.world.entity("core").unwrap();
         assert_ne!(e.transform.rot, [0.0, 0.0, 0.0]);
-        assert!(e.transform.scale > 1.0);
+        assert!(e.transform.scale[0] > 1.0);
     }
 
     #[test]
@@ -541,5 +662,444 @@ mod tests {
         let mut interp = Interpreter::new("T".into());
         interp.load(prog).unwrap();
         assert_eq!(interp.globals.get("x"), Some(&Value::Num(14.0)));
+    }
+
+    // ─── Local scoping (spec LANGUAGE.md §7 / KB §6) ───────────────────────
+
+    #[test]
+    fn eval_handler_let_is_local_and_shadows_global() {
+        let src = r#"
+            world "T" {
+                let x = 100
+                entity "e" {
+                    on frame {
+                        let x = 5
+                        scaleBy(x)
+                    }
+                }
+            }
+        "#;
+        let prog = parse(src).unwrap();
+        let mut interp = Interpreter::new("T".into());
+        interp.load(prog).unwrap();
+        let handlers = interp.world.handlers_for(crate::ast::EventKind::Frame, "e");
+        let body: Vec<Stmt> = handlers.iter().flat_map(|h| h.body.clone()).collect();
+        interp.run_handler(Some("e".into()), &body).unwrap();
+        let e = interp.world.entity("e").unwrap();
+        // Handler memakai local x=5, bukan global x=100.
+        assert_eq!(e.transform.scale, [5.0, 5.0, 5.0]);
+        // Global x TIDAK boleh berubah (shadowing, bukan overwrite).
+        assert_eq!(interp.globals.get("x"), Some(&Value::Num(100.0)));
+    }
+
+    #[test]
+    fn eval_block_let_is_scoped() {
+        let src = r#"
+            world "T" {
+                entity "e" {
+                    on frame {
+                        let x = 2
+                        {
+                            let x = 99
+                            scaleBy(x)   # inner block: x = 99
+                        }
+                        scaleBy(x)       # outer handler scope: x masih 2
+                    }
+                }
+            }
+        "#;
+        let prog = parse(src).unwrap();
+        let mut interp = Interpreter::new("T".into());
+        interp.load(prog).unwrap();
+        let handlers = interp.world.handlers_for(crate::ast::EventKind::Frame, "e");
+        let body: Vec<Stmt> = handlers.iter().flat_map(|h| h.body.clone()).collect();
+        interp.run_handler(Some("e".into()), &body).unwrap();
+        let e = interp.world.entity("e").unwrap();
+        // 99 * 2 = 198 — let di blok dalam tidak bocor keluar blok.
+        assert_eq!(e.transform.scale, [198.0, 198.0, 198.0]);
+    }
+
+    #[test]
+    fn eval_assign_targets_nearest_scope() {
+        let src = r#"
+            world "T" {
+                let g = 1
+                entity "e" {
+                    on frame {
+                        g = 7                # assign ke GLOBAL (terdekat: global)
+                        let l = 1
+                        l = l + 2            # assign ke LOCAL (terdekat: local)
+                        scaleBy(g * l)       # 7 * 3 = 21
+                    }
+                }
+            }
+        "#;
+        let prog = parse(src).unwrap();
+        let mut interp = Interpreter::new("T".into());
+        interp.load(prog).unwrap();
+        let handlers = interp.world.handlers_for(crate::ast::EventKind::Frame, "e");
+        let body: Vec<Stmt> = handlers.iter().flat_map(|h| h.body.clone()).collect();
+        interp.run_handler(Some("e".into()), &body).unwrap();
+        let e = interp.world.entity("e").unwrap();
+        assert_eq!(e.transform.scale, [21.0, 21.0, 21.0]);
+        // g ter-update di globals (assignment eksplisit ke global).
+        assert_eq!(interp.globals.get("g"), Some(&Value::Num(7.0)));
+        // l TIDAK boleh bocor ke globals — local murni.
+        assert!(!interp.globals.contains_key("l"));
+    }
+
+    #[test]
+    fn eval_assign_unknown_variable_errors() {
+        let src = r#"
+            world "T" {
+                entity "e" {
+                    on frame {
+                        ghost = 42
+                    }
+                }
+            }
+        "#;
+        let prog = parse(src).unwrap();
+        let mut interp = Interpreter::new("T".into());
+        interp.load(prog).unwrap();
+        let handlers = interp.world.handlers_for(crate::ast::EventKind::Frame, "e");
+        let body: Vec<Stmt> = handlers.iter().flat_map(|h| h.body.clone()).collect();
+        let res = interp.run_handler(Some("e".into()), &body);
+        // Assignment ke variabel yang tidak pernah dideklarasikan = error (KB §6).
+        assert!(res.is_err());
+        let msg = res.unwrap_err();
+        assert!(msg.contains("ghost"), "error harus menyebut nama variabel: {msg}");
+    }
+
+    #[test]
+    fn eval_handler_locals_isolated_between_entities() {
+        let src = r#"
+            world "T" {
+                entity "a" {
+                    on frame {
+                        let k = 3
+                        scaleBy(k)
+                    }
+                }
+                entity "b" {
+                    on frame {
+                        let k = 7
+                        scaleBy(k)
+                    }
+                }
+            }
+        "#;
+        let prog = parse(src).unwrap();
+        let mut interp = Interpreter::new("T".into());
+        interp.load(prog).unwrap();
+
+        // Jalankan handler entity "a" → scale jadi 3
+        let ha = interp.world.handlers_for(crate::ast::EventKind::Frame, "a");
+        let ba: Vec<Stmt> = ha.iter().flat_map(|h| h.body.clone()).collect();
+        interp.run_handler(Some("a".into()), &ba).unwrap();
+        assert_eq!(interp.world.entity("a").unwrap().transform.scale, [3.0, 3.0, 3.0]);
+
+        // Jalankan handler entity "b" → scale jadi 7 (bukan 3!)
+        let hb = interp.world.handlers_for(crate::ast::EventKind::Frame, "b");
+        let bb: Vec<Stmt> = hb.iter().flat_map(|h| h.body.clone()).collect();
+        interp.run_handler(Some("b".into()), &bb).unwrap();
+        assert_eq!(interp.world.entity("b").unwrap().transform.scale, [7.0, 7.0, 7.0]);
+
+        // k tidak pernah bocor ke globals.
+        assert!(!interp.globals.contains_key("k"));
+    }
+
+    #[test]
+    fn eval_function_scope_and_reentrancy() {
+        let src = r#"
+            world "T" {
+                let g = 5
+                func f(x) {
+                    let y = x * 2
+                    g = 99        # assign ke global — harus di-restore setelah call
+                    return y
+                }
+                entity "e" {
+                    on frame {
+                        scaleBy(f(4))
+                    }
+                }
+            }
+        "#;
+        let prog = parse(src).unwrap();
+        let mut interp = Interpreter::new("T".into());
+        interp.load(prog).unwrap();
+        let handlers = interp.world.handlers_for(crate::ast::EventKind::Frame, "e");
+        let body: Vec<Stmt> = handlers.iter().flat_map(|h| h.body.clone()).collect();
+        interp.run_handler(Some("e".into()), &body).unwrap();
+        let e = interp.world.entity("e").unwrap();
+        // f(4) = 4 * 2 = 8
+        assert_eq!(e.transform.scale, [8.0, 8.0, 8.0]);
+        // Reentrancy spec §8.3: globals di-restore — g kembali ke 5.
+        assert_eq!(interp.globals.get("g"), Some(&Value::Num(5.0)));
+        // Param x dan local y tidak bocor ke globals.
+        assert!(!interp.globals.contains_key("x"));
+        assert!(!interp.globals.contains_key("y"));
+    }
+
+    #[test]
+    fn eval_assign_from_nested_block_targets_enclosing_local() {
+        // Nearest-scope walk: assignment di blok dalam harus menemukan local
+        // yang dideklarasikan di scope handler (bukan global).
+        let src = r#"
+            world "T" {
+                let a = 100
+                entity "e" {
+                    on frame {
+                        let a = 1
+                        {
+                            a = 5      # target: local handler `a`, bukan global 100
+                        }
+                        scaleBy(a)     # 5
+                    }
+                }
+            }
+        "#;
+        let prog = parse(src).unwrap();
+        let mut interp = Interpreter::new("T".into());
+        interp.load(prog).unwrap();
+        let handlers = interp.world.handlers_for(crate::ast::EventKind::Frame, "e");
+        let body: Vec<Stmt> = handlers.iter().flat_map(|h| h.body.clone()).collect();
+        interp.run_handler(Some("e".into()), &body).unwrap();
+        let e = interp.world.entity("e").unwrap();
+        assert_eq!(e.transform.scale, [5.0, 5.0, 5.0]);
+        // Global a tidak tersentuh.
+        assert_eq!(interp.globals.get("a"), Some(&Value::Num(100.0)));
+    }
+
+    #[test]
+    fn eval_handler_locals_fresh_per_invocation() {
+        // Stateless per frame: local let di-inisialisasi ulang setiap eksekusi
+        // handler (bukan di-cache antar frame).
+        let src = r#"
+            world "T" {
+                entity "e" {
+                    on frame {
+                        let n = 3
+                        scaleBy(n)
+                    }
+                }
+            }
+        "#;
+        let prog = parse(src).unwrap();
+        let mut interp = Interpreter::new("T".into());
+        interp.load(prog).unwrap();
+        let handlers = interp.world.handlers_for(crate::ast::EventKind::Frame, "e");
+        let body: Vec<Stmt> = handlers.iter().flat_map(|h| h.body.clone()).collect();
+
+        // Frame 1: 1 * 3 = 3
+        interp.run_handler(Some("e".into()), &body).unwrap();
+        // Frame 2: tetap 3 * 3 = 9 (bukan 3^2 yang salah karena local n
+        // tidak dibawa antar frame)
+        interp.run_handler(Some("e".into()), &body).unwrap();
+        assert_eq!(interp.world.entity("e").unwrap().transform.scale, [9.0, 9.0, 9.0]);
+        assert!(!interp.globals.contains_key("n"));
+    }
+
+    // ─── Peningkatan spec↔impl (mesh positional, points, implicit return) ──
+
+    #[test]
+    fn eval_mesh_positional_box_sets_size() {
+        let src = r#"
+            world "T" {
+                entity "e" { mesh box 2.0 }
+            }
+        "#;
+        let prog = parse(src).unwrap();
+        let mut interp = Interpreter::new("T".into());
+        interp.load(prog).unwrap();
+        let e = interp.world.entity("e").unwrap();
+        // `mesh box 2.0` → ukuran box 2.0 (spec §5.2 / KB §4.3), bukan radius.
+        assert_eq!(e.mesh, MeshKind::Box);
+        assert_eq!(e.mesh_params.size, 2.0);
+    }
+
+    #[test]
+    fn eval_mesh_positional_grid_sets_size_and_count() {
+        let src = r#"
+            world "T" {
+                entity "e" { mesh grid 26 20 }
+            }
+        "#;
+        let prog = parse(src).unwrap();
+        let mut interp = Interpreter::new("T".into());
+        interp.load(prog).unwrap();
+        let e = interp.world.entity("e").unwrap();
+        assert_eq!(e.mesh, MeshKind::Grid);
+        assert_eq!(e.mesh_params.size, 26.0);
+        assert_eq!(e.mesh_params.count, 20.0);
+    }
+
+    #[test]
+    fn eval_mesh_positional_icosa_sets_inner() {
+        let src = r#"
+            world "T" {
+                entity "e" { mesh icosa 1.5 0.65 }
+            }
+        "#;
+        let prog = parse(src).unwrap();
+        let mut interp = Interpreter::new("T".into());
+        interp.load(prog).unwrap();
+        let e = interp.world.entity("e").unwrap();
+        assert_eq!(e.mesh, MeshKind::Icosa);
+        assert_eq!(e.mesh_params.radius, 1.5);
+        assert_eq!(e.mesh_params.inner, 0.65);
+    }
+
+    #[test]
+    fn eval_points_material_maps_to_points() {
+        let src = r#"
+            world "T" {
+                entity "e" { material points (1 1 1) 0.5 }
+            }
+        "#;
+        let prog = parse(src).unwrap();
+        let mut interp = Interpreter::new("T".into());
+        interp.load(prog).unwrap();
+        let e = interp.world.entity("e").unwrap();
+        assert_eq!(e.material, MaterialKind::Points);
+        assert_eq!(e.color, [1.0, 1.0, 1.0, 0.5]);
+    }
+
+    #[test]
+    fn eval_function_implicit_return_last_expression() {
+        let src = r#"
+            world "T" {
+                func spin_speed() { 0.4 }
+                func triple(x) { x * 3 }
+                entity "e" {
+                    on frame {
+                        scaleBy(spin_speed() + triple(2))   # 0.4 + 6 = 6.4
+                    }
+                }
+            }
+        "#;
+        let prog = parse(src).unwrap();
+        let mut interp = Interpreter::new("T".into());
+        interp.load(prog).unwrap();
+        let handlers = interp.world.handlers_for(crate::ast::EventKind::Frame, "e");
+        let body: Vec<Stmt> = handlers.iter().flat_map(|h| h.body.clone()).collect();
+        interp.run_handler(Some("e".into()), &body).unwrap();
+        let e = interp.world.entity("e").unwrap();
+        // Implicit return: nilai ekspresi terakhir body fungsi dikembalikan (KB §4.1).
+        assert!((e.transform.scale[0] - 6.4).abs() < 1e-9);
+    }
+
+    #[test]
+    fn eval_function_implicit_return_keeps_explicit_return_priority() {
+        let src = r#"
+            world "T" {
+                func f() { 10 return 5 }   # whitespace-separated; ADILang tanpa semicolon
+                entity "e" {
+                    on frame {
+                        scaleBy(f())
+                    }
+                }
+            }
+        "#;
+        let prog = parse(src).unwrap();
+        let mut interp = Interpreter::new("T".into());
+        interp.load(prog).unwrap();
+        let handlers = interp.world.handlers_for(crate::ast::EventKind::Frame, "e");
+        let body: Vec<Stmt> = handlers.iter().flat_map(|h| h.body.clone()).collect();
+        interp.run_handler(Some("e".into()), &body).unwrap();
+        let e = interp.world.entity("e").unwrap();
+        assert_eq!(e.transform.scale[0], 5.0);
+    }
+
+    #[test]
+    fn eval_function_recursion_scoped_params() {
+        let src = r#"
+            world "T" {
+                func fib(n) {
+                    if n < 2 {
+                        return n
+                    }
+                    return fib(n - 1) + fib(n - 2)
+                }
+                entity "e" {
+                    on frame {
+                        scaleBy(fib(6))
+                    }
+                }
+            }
+        "#;
+        let prog = parse(src).unwrap();
+        let mut interp = Interpreter::new("T".into());
+        interp.load(prog).unwrap();
+        let handlers = interp.world.handlers_for(crate::ast::EventKind::Frame, "e");
+        let body: Vec<Stmt> = handlers.iter().flat_map(|h| h.body.clone()).collect();
+        interp.run_handler(Some("e".into()), &body).unwrap();
+        let e = interp.world.entity("e").unwrap();
+        // fib(6) = 8 — param n di-frame terpisah per call, rekursi aman.
+        assert_eq!(e.transform.scale, [8.0, 8.0, 8.0]);
+    }
+
+    // ─── Per-axis scale (v1.2.0, Extension Protocol) ─────────────────────
+
+    #[test]
+    fn eval_set_scale_per_axis() {
+        let src = r#"
+            world "T" {
+                entity "e" {
+                    on frame {
+                        setScale(2, 3, 4)
+                    }
+                }
+            }
+        "#;
+        let prog = parse(src).unwrap();
+        let mut interp = Interpreter::new("T".into());
+        interp.load(prog).unwrap();
+        let handlers = interp.world.handlers_for(crate::ast::EventKind::Frame, "e");
+        let body: Vec<Stmt> = handlers.iter().flat_map(|h| h.body.clone()).collect();
+        interp.run_handler(Some("e".into()), &body).unwrap();
+        let e = interp.world.entity("e").unwrap();
+        assert_eq!(e.transform.scale, [2.0, 3.0, 4.0]);
+    }
+
+    #[test]
+    fn eval_set_scale_uniform_backward_compat() {
+        let src = r#"
+            world "T" {
+                entity "e" {
+                    on frame {
+                        setScale(5)
+                    }
+                }
+            }
+        "#;
+        let prog = parse(src).unwrap();
+        let mut interp = Interpreter::new("T".into());
+        interp.load(prog).unwrap();
+        let handlers = interp.world.handlers_for(crate::ast::EventKind::Frame, "e");
+        let body: Vec<Stmt> = handlers.iter().flat_map(|h| h.body.clone()).collect();
+        interp.run_handler(Some("e".into()), &body).unwrap();
+        assert_eq!(interp.world.entity("e").unwrap().transform.scale, [5.0, 5.0, 5.0]);
+    }
+
+    #[test]
+    fn eval_scale_by_per_axis() {
+        let src = r#"
+            world "T" {
+                entity "e" {
+                    on frame {
+                        scaleBy(2, 3, 4)
+                    }
+                }
+            }
+        "#;
+        let prog = parse(src).unwrap();
+        let mut interp = Interpreter::new("T".into());
+        interp.load(prog).unwrap();
+        let handlers = interp.world.handlers_for(crate::ast::EventKind::Frame, "e");
+        let body: Vec<Stmt> = handlers.iter().flat_map(|h| h.body.clone()).collect();
+        interp.run_handler(Some("e".into()), &body).unwrap();
+        assert_eq!(interp.world.entity("e").unwrap().transform.scale, [2.0, 3.0, 4.0]);
     }
 }

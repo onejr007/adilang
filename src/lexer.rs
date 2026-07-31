@@ -24,7 +24,6 @@ pub enum TokKind {
     Gt,           // >
     Le,           // <=
     Ge,           // >=
-    Arrow,        // ->
     Eof,
 }
 
@@ -215,16 +214,7 @@ pub fn tokenize(src: &str) -> Result<Vec<Token>, String> {
                 }
             }
             '+' => { tokens.push(Token { kind: TokKind::Plus, line, col }); bump(&mut i, &mut line, &mut col); }
-            '-' => {
-                if i + 1 < chars.len() && chars[i + 1] == '>' {
-                    tokens.push(Token { kind: TokKind::Arrow, line, col });
-                    bump(&mut i, &mut line, &mut col);
-                    bump(&mut i, &mut line, &mut col);
-                } else {
-                    tokens.push(Token { kind: TokKind::Minus, line, col });
-                    bump(&mut i, &mut line, &mut col);
-                }
-            }
+            '-' => { tokens.push(Token { kind: TokKind::Minus, line, col }); bump(&mut i, &mut line, &mut col); }
             '*' => { tokens.push(Token { kind: TokKind::Star, line, col }); bump(&mut i, &mut line, &mut col); }
             '/' => { tokens.push(Token { kind: TokKind::Slash, line, col }); bump(&mut i, &mut line, &mut col); }
             '%' => { tokens.push(Token { kind: TokKind::Percent, line, col }); bump(&mut i, &mut line, &mut col); }

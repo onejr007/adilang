@@ -39,6 +39,14 @@ pub fn scale(s: f32) -> Mat4 {
     m
 }
 
+pub fn scale3(x: f32, y: f32, z: f32) -> Mat4 {
+    let mut m = identity();
+    m[0] = x;
+    m[5] = y;
+    m[10] = z;
+    m
+}
+
 pub fn rot_x(a: f32) -> Mat4 {
     let c = a.cos();
     let s = a.sin();

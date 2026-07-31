@@ -1,0 +1,199 @@
+# adi-character.adi — Karakter hologram ADI untuk pengalaman Video Call.
+# Dirancang oleh AI (ADI Agent Ecosystem). Wajah animasi: mata berkedip,
+# mulut berbicara (event speak/silent), badan mengambang & bernapas.
+
+world "ADI Character — Video Call" {
+    camera "cam" { pos (0 1.2 6.2) look (0 1.35 0) fov 48 }
+
+    light "key"  { type point pos (4 5 6) color (0.6 0.9 1) intensity 1.6 }
+    light "fill" { type point pos (-4 -1 -2) color (0.55 0.35 1) intensity 0.7 }
+    light "amb"  { type ambient color (0.2 0.35 0.6) intensity 0.5 }
+
+    # Flag global: 1 = ADI sedang berbicara (host memanggil adilang_speak).
+    # World-level handler hanya boleh mengubah flag (bukan transform),
+    # karena dieksekusi sekali per entity.
+    let speaking = 0
+
+    on speak {
+        speaking = 1
+    }
+
+    on silent {
+        speaking = 0
+    }
+
+    # ── Kepala (bentuk humanoid hologram) ──
+    entity "head" {
+        pos (0 1.75 0)
+        mesh sphere { radius 0.62 segments 4 }
+        material solid (0.06 0.7 0.95) 0.96
+        on frame {
+            setScale(1 + 0.008 * sin(1.9 * t), 1 + 0.012 * sin(1.9 * t), 1 + 0.008 * sin(1.9 * t))
+        }
+    }
+
+    # Aura di sekeliling kepala (hologram bloom).
+    entity "headGlow" {
+        pos (0 1.75 0)
+        mesh sphere { radius 0.78 segments 3 }
+        material glow (0.1 0.8 1) 0.12
+        on frame {
+            setAlpha(0.1 + 0.06 * sin(t * 1.3))
+        }
+    }
+
+    # Visor garis di depan kepala.
+    entity "visor" {
+        pos (0 1.78 0.44)
+        mesh ring { radius 0.5 tube 0.025 }
+        material glow (0.2 0.95 1) 0.8
+        on frame {
+            setScale(1.05 + 0.03 * sin(t * 2.2), 1.05 + 0.03 * sin(t * 2.2), 1)
+        }
+    }
+
+    # ── Mata (berkedip via scale-Y) ──
+    entity "eyeL" {
+        pos (-0.2 1.92 0.48)
+        mesh sphere { radius 0.085 segments 3 }
+        material glow (0.1 1 0.9) 1
+        on frame {
+            let x = t - 3.4 * floor(t / 3.4)
+            let blink = clamp(abs(x - 0.12) * 9, 0, 1)
+            setScale(1, 0.08 + 0.92 * blink, 1)
+        }
+    }
+
+    entity "eyeR" {
+        pos (0.2 1.92 0.48)
+        mesh sphere { radius 0.085 segments 3 }
+        material glow (0.1 1 0.9) 1
+        on frame {
+            let x = t - 3.4 * floor(t / 3.4)
+            let blink = clamp(abs(x - 0.12) * 9, 0, 1)
+            setScale(1, 0.08 + 0.92 * blink, 1)
+        }
+    }
+
+    # ── Mulut (bicara saat speaking; menganga proporsional) ──
+    entity "mouth" {
+        pos (0 1.56 0.5)
+        mesh torus { radius 0.13 tube 0.05 }
+        material glow (0.15 1 0.8) 1
+        on speak {
+            setScale(1, 0.4, 0.9)
+        }
+        on silent {
+            setScale(1, 0.18, 0.4)
+        }
+        on frame {
+            let talk = 0.3 + 0.7 * (0.5 + 0.5 * sin(t * 13))
+            if speaking > 0 {
+                setScale(1, talk, 0.5 + 0.5 * talk)
+            } else {
+                setScale(1, 0.18, 0.4)
+            }
+        }
+    }
+
+    # ── Badan (torso box + aura) ──
+    entity "torso" {
+        pos (0 0.95 0)
+        mesh box
+        material solid (0.05 0.55 0.85) 0.95
+        on frame {
+            setScale(1.15, 1.6, 0.75)
+            setPos(0, 0.95 + 0.02 * sin(t * 2.1), 0)
+        }
+    }
+
+    entity "torsoGlow" {
+        pos (0 0.95 0)
+        mesh icosa { radius 1.0 inner 0.75 }
+        material glow (0.1 0.7 1) 0.2
+        on frame {
+            rotate(0.2 * t, (0.2 1 0))
+            setAlpha(0.14 + 0.06 * sin(t * 1.6))
+        }
+    }
+
+    # ── Bahu / pilar samping (struktur robotik) ──
+    entity "shoulderL" {
+        pos (-0.95 1.35 0)
+        mesh box
+        material solid (0.08 0.6 0.9) 0.9
+        on frame {
+            setScale(0.28, 0.6, 0.4)
+        }
+    }
+
+    entity "shoulderR" {
+        pos (0.95 1.35 0)
+        mesh box
+        material solid (0.08 0.6 0.9) 0.9
+        on frame {
+            setScale(0.28, 0.6, 0.4)
+        }
+    }
+
+    # ── Halo cincin (video-call ring — menyala saat bicara) ──
+    entity "haloRing" {
+        pos (0 1.85 -0.15)
+        mesh torus { radius 0.95 tube 0.018 }
+        material glow (0.3 1 0.85) 0.45
+        on speak {
+            setAlpha(0.95)
+        }
+        on silent {
+            setAlpha(0.45)
+        }
+        on frame {
+            rotate(0.15 * t, (0.15 1 0))
+            let a = 0.45 + 0.2 * sin(t * 2.4) + 0.25 * speaking
+            setAlpha(a)
+            setScale(1 + 0.04 * sin(t * 1.8), 1 + 0.04 * sin(t * 1.8), 1)
+        }
+    }
+
+    # ── Orb partikel orbit (video call badges) ──
+    entity "orb" {
+        pos (0 0 0)
+        mesh icosa { radius 0.16 inner 1 }
+        material solid (0.2 0.9 0.75) 0.9
+        on frame {
+            let a = t * 0.8
+            setPos(1.5 * cos(a), 1.5 + 0.3 * sin(2.1 * t), 1.5 * sin(a))
+        }
+    }
+
+    # ── Grid lantai holografik ──
+    entity "grid" {
+        pos (0 -0.85 0)
+        mesh grid { size 24 count 24 }
+        material wire (0.15 0.6 1) 0.16
+        on frame {
+            setAlpha(0.12 + 0.05 * sin(t))
+        }
+    }
+
+    # ── Pilar energi samping ──
+    entity "pillarL" {
+        pos (-2.4 0.2 -0.5)
+        mesh box
+        material glow (0.15 0.75 1) 0.35
+        on frame {
+            setScale(0.05, 1 + 0.12 * sin(t * 1.4), 0.05)
+            setAlpha(0.3 + 0.15 * sin(t * 1.4))
+        }
+    }
+
+    entity "pillarR" {
+        pos (2.4 0.2 -0.5)
+        mesh box
+        material glow (0.15 0.75 1) 0.35
+        on frame {
+            setScale(0.05, 1 + 0.12 * sin(t * 1.4), 0.05)
+            setAlpha(0.3 + 0.15 * sin(t * 1.4))
+        }
+    }
+}

@@ -195,7 +195,14 @@ pub fn adilang_debug_count() -> usize {
 
 #[wasm_bindgen]
 pub fn adilang_version() -> String {
-    "ADILang v1.0.0 (Rust → WASM → WebGL2)".to_string()
+    format!("ADILang v{} (Rust → WASM → WebGL2)", crate::registry::VERSION)
+}
+
+/// Enumerasi kosakata tertutup ADILang (P6 self-describing) — AI bisa
+/// membaca seluruh registry bahasa tanpa membuka docs.
+#[wasm_bindgen]
+pub fn adilang_registry() -> String {
+    crate::registry::registry_text()
 }
 
 fn timestamp_seconds() -> f64 {

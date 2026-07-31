@@ -19,6 +19,7 @@ pub enum MaterialKind {
     Solid,
     Wire,
     Glow,
+    Points,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -47,12 +48,12 @@ impl Default for MeshParams {
 pub struct Transform {
     pub pos: [f64; 3],
     pub rot: [f64; 3],
-    pub scale: f64,
+    pub scale: [f64; 3], // per-axis (uniform bila ketiga sama)
 }
 
 impl Default for Transform {
     fn default() -> Self {
-        Self { pos: [0.0, 0.0, 0.0], rot: [0.0, 0.0, 0.0], scale: 1.0 }
+        Self { pos: [0.0, 0.0, 0.0], rot: [0.0, 0.0, 0.0], scale: [1.0, 1.0, 1.0] }
     }
 }
 

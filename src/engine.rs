@@ -45,8 +45,10 @@ void main(){
 const VERTEX_LINE_SRC: &str = r#"#version 300 es
 layout(location=0) in vec3 a_pos;
 uniform mat4 u_mvp;
+uniform float u_point_size;
 void main(){
     gl_Position = u_mvp * vec4(a_pos, 1.0);
+    gl_PointSize = u_point_size;
 }
 "#;
 
@@ -76,6 +78,7 @@ struct LineProgram {
     loc_mvp: Option<glow::UniformLocation>,
     loc_color: Option<glow::UniformLocation>,
     loc_alpha: Option<glow::UniformLocation>,
+    loc_point_size: Option<glow::UniformLocation>,
 }
 
 struct GpuMesh {
@@ -84,6 +87,7 @@ struct GpuMesh {
     line_ebo: glow::Buffer,
     tri_count: i32,
     line_count: i32,
+    vert_count: i32,
 }
 
 pub struct Engine {
@@ -191,6 +195,7 @@ impl Engine {
                     line_ebo,
                     tri_count: (geom.tris.len() / 3) as i32,
                     line_count: (geom.lines.len() / 2) as i32,
+                    vert_count: geom.verts.len() as i32,
                 },
             );
         }
@@ -258,6 +263,7 @@ impl Engine {
                         self.gl.uniform_matrix_4_f32_slice(self.line.loc_mvp.as_ref(), false, &mvp);
                         self.gl.uniform_3_f32(self.line.loc_color.as_ref(), e.color[0] as f32, e.color[1] as f32, e.color[2] as f32);
                         self.gl.uniform_1_f32(self.line.loc_alpha.as_ref(), e.color[3] as f32);
+                        self.gl.uniform_1_f32(self.line.loc_point_size.as_ref(), 1.0);
                         self.gl.bind_vertex_array(Some(mesh.vao));
                         self.gl.bind_buffer(glow::ELEMENT_ARRAY_BUFFER, Some(mesh.line_ebo));
                         self.gl.draw_elements(glow::LINES, mesh.line_count * 2, glow::UNSIGNED_INT, 0);
@@ -266,6 +272,17 @@ impl Engine {
                         unsafe {
                             self.gl.blend_func(glow::SRC_ALPHA, glow::ONE_MINUS_SRC_ALPHA);
                         }
+                    }
+                }
+                MaterialKind::Points => {
+                    unsafe {
+                        self.gl.use_program(Some(self.line.program));
+                        self.gl.uniform_matrix_4_f32_slice(self.line.loc_mvp.as_ref(), false, &mvp);
+                        self.gl.uniform_3_f32(self.line.loc_color.as_ref(), e.color[0] as f32, e.color[1] as f32, e.color[2] as f32);
+                        self.gl.uniform_1_f32(self.line.loc_alpha.as_ref(), e.color[3] as f32);
+                        self.gl.uniform_1_f32(self.line.loc_point_size.as_ref(), 3.0);
+                        self.gl.bind_vertex_array(Some(mesh.vao));
+                        self.gl.draw_arrays(glow::POINTS, 0, mesh.vert_count);
                     }
                 }
             }
@@ -310,7 +327,7 @@ fn entity_model(e: &EntityState) -> Mat4 {
     let rx = math3d::rot_x(e.transform.rot[0] as f32);
     let ry = math3d::rot_y(e.transform.rot[1] as f32);
     let rz = math3d::rot_z(e.transform.rot[2] as f32);
-    let s = math3d::scale(e.transform.scale as f32);
+    let s = math3d::scale3(e.transform.scale[0] as f32, e.transform.scale[1] as f32, e.transform.scale[2] as f32);
     math3d::mul(&t, &math3d::mul(&math3d::mul(&rx, &math3d::mul(&ry, &rz)), &s))
 }
 
@@ -337,6 +354,7 @@ fn compile_line(gl: &glow::Context) -> Result<LineProgram, String> {
             loc_mvp: gl.get_uniform_location(program, "u_mvp"),
             loc_color: gl.get_uniform_location(program, "u_color"),
             loc_alpha: gl.get_uniform_location(program, "u_alpha"),
+            loc_point_size: gl.get_uniform_location(program, "u_point_size"),
             program,
         })
     }
@@ -391,7 +409,7 @@ pub struct Geometry {
 pub fn generate_mesh(kind: MeshKind, p: &MeshParams) -> Geometry {
     match kind {
         MeshKind::Sphere => sphere(p.radius as f32, p.segments as usize),
-        MeshKind::Box => box_mesh(),
+        MeshKind::Box => box_mesh(p.size as f32),
         MeshKind::Torus => torus(p.radius as f32, p.tube as f32),
         MeshKind::Icosa => icosa(p.radius as f32, p.inner as f32),
         MeshKind::Ring => ring(p.radius as f32, p.tube as f32),
@@ -443,48 +461,34 @@ fn sphere(radius: f32, segs: usize) -> Geometry {
     g
 }
 
-fn box_mesh() -> Geometry {
+fn box_mesh(size: f32) -> Geometry {
     let mut g = Geometry::default();
-    let faces: [([f32; 3], [f32; 3]); 6] = [
-        ([1.0, 0.0, 0.0], [1.0, 0.0, 0.0]),
-        ([-1.0, 0.0, 0.0], [-1.0, 0.0, 0.0]),
-        ([0.0, 1.0, 0.0], [0.0, 1.0, 0.0]),
-        ([0.0, -1.0, 0.0], [0.0, -1.0, 0.0]),
-        ([0.0, 0.0, 1.0], [0.0, 0.0, 1.0]),
-        ([0.0, 0.0, -1.0], [0.0, 0.0, -1.0]),
+    let h = size / 2.0;
+    // 8 vertex box (unit center), dinormalisasi ke ukuran `size` per sisi.
+    let corners: [Vec3; 8] = [
+        [-h, -h, -h], [h, -h, -h], [h, -h, h], [-h, -h, h],
+        [-h, h, -h], [h, h, -h], [h, h, h], [-h, h, h],
     ];
-    for (axis, n) in faces {
-        let (u1, v1) = perpendicular_axes(axis);
+    // 6 face: (indeks 4 corner, normal)
+    let faces: [([usize; 4], Vec3); 6] = [
+        ([0, 1, 2, 3], [0.0, -1.0, 0.0]), // bawah
+        ([4, 5, 6, 7], [0.0, 1.0, 0.0]),  // atas
+        ([0, 4, 5, 1], [0.0, 0.0, -1.0]), // depan
+        ([2, 6, 7, 3], [0.0, 0.0, 1.0]),  // belakang
+        ([1, 5, 6, 2], [1.0, 0.0, 0.0]),  // kanan
+        ([0, 3, 7, 4], [-1.0, 0.0, 0.0]), // kiri
+    ];
+    for (idx, n) in faces {
         let base = g.verts.len() as u32;
-        for s in [0.0f32, 1.0] {
-            for t in [0.0f32, 1.0] {
-                let cu = u1[0] * (2.0 * s - 1.0) + u1[1] * (2.0 * t - 1.0);
-                let cv = v1[0] * (2.0 * s - 1.0) + v1[1] * (2.0 * t - 1.0);
-                let cuv = [cu, 0.0, cv];
-                let pos = [
-                    axis[0] * 0.5 + cuv[0],
-                    axis[1] * 0.5 + cuv[2],
-                    axis[2] * 0.5 + cuv[1],
-                ];
-                push_vert(&mut g, pos, n);
-            }
+        for &ci in &idx {
+            push_vert(&mut g, corners[ci], n);
         }
-        g.tris.extend_from_slice(&[base, base + 1, base + 2, base + 2, base + 1, base + 3]);
+        g.tris.extend_from_slice(&[base, base + 1, base + 2, base, base + 2, base + 3]);
         g.lines.extend_from_slice(&[
             base, base + 1, base + 1, base + 3, base + 3, base + 2, base + 2, base,
         ]);
     }
     g
-}
-
-fn perpendicular_axes(axis: [f32; 3]) -> ([f32; 3], [f32; 3]) {
-    if axis[0].abs() > 0.5 {
-        ([0.0, 0.0, 1.0], [0.0, 1.0, 0.0])
-    } else if axis[1].abs() > 0.5 {
-        ([1.0, 0.0, 0.0], [0.0, 0.0, 1.0])
-    } else {
-        ([1.0, 0.0, 0.0], [0.0, 1.0, 0.0])
-    }
 }
 
 fn torus(r: f32, tube: f32) -> Geometry {

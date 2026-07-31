@@ -246,11 +246,34 @@ impl Parser {
                     Ok(Stmt::Return(value))
                 }
                 "on" => {
-                    // handler dalam stmt? tidak umum; biarkan call
-                    let h = self.parse_handler()?;
-                    // Re-represent: kita abaikan handler dalam blok (jarang).
-                    let _ = h;
-                    Ok(Stmt::Block(Vec::new()))
+                    // Handler hanya diizinkan di level entity / top-level, BUKAN
+                    // di dalam statement (spec §4.5, EBNF handler ::= "on" event_name ...).
+                    // Dulu di-parse lalu dibuang diam-diam — sekarang error eksplisit
+                    // agar deterministik (KB §5.1: unknown usage = non-conforming).
+                    // Namun `on` TETAP identifier bebas (P4 — tanpa reserved words):
+                    // error hanya saat `on` diikuti event yang dikenal, sehingga
+                    // user masih boleh memakai `on` sebagai nama fungsi/variabel.
+                    let is_handler_attempt = matches!(
+                        self.peek2(),
+                        TokKind::Ident(ev) if matches!(ev.as_str(), "frame" | "speak" | "silent" | "click")
+                    );
+                    if is_handler_attempt {
+                        return Err(format!(
+                            "Handler 'on' hanya diizinkan di level entity/top-level, bukan di dalam statement (baris {})",
+                            self.line()
+                        ));
+                    }
+                    // jatuh ke penanganan ident biasa (assign / call / expr)
+                    let name = kw;
+                    if self.peek2() == &TokKind::Assign {
+                        self.advance();
+                        self.advance();
+                        let value = self.parse_expr()?;
+                        Ok(Stmt::Assign { name, value })
+                    } else {
+                        let e = self.parse_expr()?;
+                        Ok(Stmt::ExprStmt(e))
+                    }
                 }
                 _ => {
                     // assign `x = expr` atau call `name(...)` atau expr
@@ -419,10 +442,10 @@ impl Parser {
 }
 
 fn is_builder(id: &str) -> bool {
-    matches!(
-        id,
-        "sphere" | "box" | "torus" | "icosa" | "ring" | "plane" | "grid" | "solid" | "wire" | "glow" | "points"
-    )
+    // SUMBER TUNGGAL KEBENARAN: daftar builder hidup di registry.rs
+    // (MESH_BUILDERS / MATERIAL_BUILDERS). Parser tidak menduplikasi daftar —
+    // tambah builder baru cukup di registry.rs, parser ikut otomatis.
+    crate::registry::is_builder(id)
 }
 
 #[cfg(test)]
@@ -465,5 +488,16 @@ mod tests {
 setPos(2.1 * cos(a), 0.35 * sin(2.3 * t), 2.1 * sin(a)) } } }";
         let prog = parse(src).unwrap();
         assert_eq!(prog.items.len(), 1);
+    }
+
+    #[test]
+    fn parse_rejects_handler_inside_statement() {
+        // Handler `on` HANYA diizinkan di level entity/top-level (spec §4.5).
+        // Dulu di-parse lalu dibuang diam-diam; sekarang harus error eksplisit.
+        let src = "world \"w\" { entity \"e\" { on frame { on click { } } } }";
+        let res = parse(src);
+        assert!(res.is_err(), "handler di dalam statement harus ditolak");
+        let msg = res.unwrap_err();
+        assert!(msg.contains("on"), "error harus menyebut 'on': {msg}");
     }
 }

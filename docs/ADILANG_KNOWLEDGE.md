@@ -1,7 +1,7 @@
 # ADILang Knowledge Base (KB)
 
 > **Document ID**: ADILANG-KB-001
-> **Version**: 1.1.0
+> **Version**: 1.2.0
 > **Status**: STABLE
 > **Author**: ADI (Agent Distributed Intelligence)
 > **Purpose**: Self-contained learning corpus so **any AI** can learn ADILang from
@@ -158,6 +158,7 @@ mesh grid { size 26 count 26 }           # count [2,128]
 material solid (r g b) alpha?
 material wire  (r g b) alpha?
 material glow  (r g b) alpha?            # additive blend
+material points (r g b) alpha?           # vertex cloud (gl.POINTS)
 # alpha optional; defaults 1.0
 ```
 
@@ -176,7 +177,7 @@ f(1 2 3)
 
 ```
 sin(t) cos(t) tan(t) sqrt(abs) pow(a b) clamp(x lo hi) lerp(a b k) min(a b) max(a b)
-move(dx dy dz) setPos(x y z) setScale(s) scaleBy(f)
+move(dx dy dz) setPos(x y z) setScale(s | x y z) scaleBy(f | x y z)
 rotate(angle (ax ay az)) setColor(r g b) setAlpha(a)
 ```
 
@@ -245,17 +246,20 @@ a `reply` block, describes agent work as `task` blocks, and records occurrences 
 
 **Declarations**: `world camera light entity let func on`
 
+**Statements**: `let if return` (keyword-started statements; `assign`/`expr`/`block`
+are positional, not keyword-led)
+
 **Events**: `frame speak silent click`
 
 **Mesh builders**: `sphere box torus icosa ring plane grid`
 
-**Material builders**: `solid wire glow points` (points currently → solid)
+**Material builders**: `solid wire glow points` (points = vertex cloud / gl.POINTS)
 
 **Entity props**: `pos rot scale mesh material`
 
 **Camera props**: `pos look fov`
 
-**Light props**: `type pos color intensity` (type: `point|ambient`)
+**Light props**: `type pos color intensity` — enum `lightprop.type`: `point ambient`
 
 **Transforms (entity context)**: `move setPos setScale scaleBy rotate setColor setAlpha`
 
@@ -301,7 +305,13 @@ a `reply` block, describes agent work as `task` blocks, and records occurrences 
    - render: `solid` with directional lighting; `wire`/`glow` as lines (glow = additive blend)
 3. **Events** (`speak`/`silent`/`click`): fire handlers for all entities that declare them.
    `click` = pointer down on the canvas.
-4. **Error behavior**: any runtime error is logged (`console.warn`) but the loop continues;
+4. **Implicit return**: a function whose body ends without `return` returns the value of
+   its last expression statement (e.g. `func spin_speed() { 0.4 }` → `0.4`); explicit
+   `return` always takes precedence.
+5. **Self-describing**: `adilang_registry()` enumerates the entire closed vocabulary
+   (mesh/material builders, transforms, math, events, protocol modules & keys, verbs)
+   so any AI can inspect the language without reading the docs.
+6. **Error behavior**: any runtime error is logged (`console.warn`) but the loop continues;
    the offending handler aborts for that frame only.
 
 **Lighting model** (solid material):
@@ -354,6 +364,33 @@ Follow the governance in Spec §11. Short version:
 **Changelog convention** (append here):
 
 ```
+## [1.2.0] — 2026-07 — per-axis scale, self-describing registry, spec↔impl fixes
+- Registry kini memvalidasi grammar lengkap: kategori `statement` (`let if return`)
+  dan enum `lightprop.type` (`point ambient`) ditambahkan ke `registry_text()`,
+  mirror Python `ADILANG_REGISTRY`, dan `scripts/check_adilang_registry.py`
+  (diekstrak dari parser.rs `parse_stmt` dan eval.rs arm `"type" =>`) — drift
+  kosakata grammar terdeteksi otomatis.
+- Self-describing (P6): `adilang_registry()` enumerates the entire closed
+  vocabulary (mesh/material builders, transforms, math, events, idents,
+  protocol modules & keys, verbs) — versioned by `VERSION` const (1.2.0).
+- `points` material now actually renders the mesh's vertex cloud (gl.POINTS);
+  previously it was parsed but rendered as solid.
+- Implicit return: a `func` whose body ends without `return` returns the value
+  of its last expression statement (`func spin_speed() { 0.4 }` → `0.4`);
+  explicit `return` always takes precedence (KB §4.1 now implemented).
+- Spec↔impl fixes: `mesh box <size>` sets size (was mis-mapped to radius and
+  ignored); `mesh grid <size> <count>` and `mesh icosa <radius> <inner>`
+  positional args now map per spec §5.2 / KB §4.3.
+- Cleanup: removed unused `->` token from the lexer; `on <event>` inside a
+  statement body now errors explicitly instead of being silently discarded
+  (still P4-compliant: `on` remains a free identifier otherwise).
+- `setScale` / `scaleBy` now accept per-axis arguments:
+  - `setScale(x, y, z)` absolute; `setScale(s)` still uniform (backward compatible).
+  - `scaleBy(x, y, z)` per-axis multiply; `scaleBy(f)` still uniform.
+- Enables character animation (eye blink, talking mouth) via per-axis Y scale.
+- `worlds/adi-character.adi` — ADI video-call character (head, eyes, mouth,
+  torso, halo ring) driven by speak/silent events + frame handlers.
+
 ## [1.1.0] — 2026-07 — protocol modules
 - ADILang is now a protocol / IR language: added intent/reply/task/event modules
   (pure key/value blocks) alongside the existing world module.

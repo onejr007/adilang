@@ -1,8 +1,8 @@
 [package]
 name = "adilang"
-version = "0.1.0"
+version = "1.2.0"
 edition = "2021"
-description = "ADILang — AI-designed DSL for 3D virtual worlds (Rust → WASM → WebGL2)"
+description = "ADILang — AI-designed protocol/IR language: intent | reply | task | event modules + 3D world module (Rust → WASM → WebGL2)"
 license = "MIT"
 
 [lib]
