@@ -253,6 +253,34 @@ web, CLI, TMA, inline) into an `intent` block before processing, wraps each answ
 a `reply` block, describes agent work as `task` blocks, and records occurrences as
 `event` blocks. Any AI can interoperate with ADI by speaking these modules.
 
+**Memory convention (no new syntax):** temporary memory / fact-exchange traces
+between agents use the existing `event` module with the tag `fact_memory` — event
+keys stay closed (`source key session at line token guidance`). Long-term facts use
+the `memory` module (v1.5.0) whose content key is `fact` (NOT `value` — `value` is
+not part of the closed vocabulary):
+
+```
+event "fact_memory" {
+    source "crewai_agent"
+    key "user_preference"
+    session "SESS-TG1234"
+    at "2026-07-31T10:00:00Z"
+}
+
+memory "user_preference" {
+    key "coding_style"
+    fact "C# .NET Core, MSSQL, modular architecture"
+    topic "developer_profile"
+    confidence "0.98"
+}
+```
+
+**Streaming buffer (backend tooling):** `core/adilang_stream_buffer.py` parses
+ADILang chunk-by-chunk (LLM token stream) with a deterministic state machine
+(IDLE→TAG→OPEN→FIELDS→DONE) — header detected and complete fields extracted BEFORE
+the closing `}` arrives. Pure stdlib, transactional (rollback on partial tokens), usable
+via `stream_blocks()` generator.
+
 ---
 
 ## 5. Vocabulary Registry (the complete closed inventory)
@@ -290,7 +318,11 @@ are positional, not keyword-led)
 
 **Module headers**: `world intent reply task event memory plan`
 
-**Protocol keys**: `mode payload verb content recs assign input expect source key session at`
+**Protocol keys**: `mode payload verb content recs assign input expect source key session at line token guidance`
+
+**Memory keys (v1.5.0)**: `key topic fact confidence source at` — content key is `fact` (NOT `value`)
+
+**Plan keys (v1.5.0)**: `steps parallel` — `steps` = array of `"<id>:<action>:<depends_csv>"` (acyclic, Kahn topo-sort)
 
 **intent verbs (closed set)**: `ask inform command greet system`
 
@@ -437,4 +469,8 @@ Follow the governance in Spec §11. Short version:
   - `src/engine.rs` — WebGL2 renderer (glow)
   - `src/wasm_api.rs` — wasm-bindgen boundary
   - `worlds/default.adi` — example world
+- Backend tooling (main repo): `core/adilang_protocol.py` (encoders/validators,
+  incl. `encode_fact_memory`), `core/adilang_ir_store.py` (`record_fact_memory`),
+  `core/adilang_stream_buffer.py` (incremental streaming parser),
+  `scripts/adilang_check.py` (linter mirror).
 - Build: `cargo test` (native), `wasm-pack build --target web` (WASM).
