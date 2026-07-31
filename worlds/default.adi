@@ -1,0 +1,68 @@
+# default.adi — Virtual World ADI (ADILang)
+# Dirancang oleh AI (ADI Agent Ecosystem). Bisa di-improve / di-generate ulang oleh ADI.
+
+world "ADI Hologram" {
+    camera "cam" { pos (0 1.6 7) look (0 0 0) fov 55 }
+
+    light "key"  { type point pos (5 6 4) color (1 0.95 0.9) intensity 1.5 }
+    light "fill" { type ambient color (0.25 0.5 0.9) intensity 0.45 }
+
+    entity "core" {
+        pos (0 0 0)
+        mesh sphere { radius 0.8 segments 3 }
+        material wire (0.15 0.8 1) 0.9
+        on frame {
+            rotate(0.35 * t, (0.15 1 0.1))
+            scaleBy(1 + 0.05 * sin(2.1 * t))
+        }
+    }
+
+    entity "shell" {
+        pos (0 0 0)
+        mesh icosa { radius 1.5 inner 0.65 }
+        material glow (0.1 0.7 1) 0.35
+        on frame {
+            rotate(-0.12 * t, (0.4 1 0.3))
+            setAlpha(0.3 + 0.1 * sin(1.7 * t))
+        }
+    }
+
+    entity "ring1" {
+        pos (0 0 0)
+        mesh torus { radius 1.5 tube 0.02 }
+        material glow (0.3 0.9 1) 0.8
+        on frame {
+            rotate(-0.3 * t, (0.5 1 0))
+            scaleBy(1 + 0.03 * sin(3.2 * t))
+        }
+    }
+
+    entity "ring2" {
+        pos (0 0 0)
+        mesh ring { radius 1.2 tube 0.012 }
+        material glow (0.6 0.4 1) 0.5
+        on frame {
+            rotate(0.45 * t, (1 0.4 0.2))
+            setAlpha(0.4 + 0.15 * sin(2.6 * t))
+        }
+    }
+
+    entity "orbit" {
+        pos (0 0 0)
+        mesh icosa { radius 0.55 inner 1 }
+        material solid (0.1 0.9 0.7) 0.5
+        on frame {
+            let a = t * 1.2
+            setPos(2.1 * cos(a), 0.35 * sin(2.3 * t), 2.1 * sin(a))
+        }
+    }
+
+    entity "grid" {
+        pos (0 -2.6 0)
+        mesh grid { size 26 count 26 }
+        material wire (0.15 0.6 1) 0.18
+        on frame {
+            setAlpha(0.14 + 0.05 * sin(t))
+        }
+    }
+}

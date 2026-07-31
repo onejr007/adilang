@@ -1,0 +1,133 @@
+# ============================================================================
+# ADILang Formal Grammar — EBNF (W3C-style)
+# Version: 1.0  |  Status: STABLE
+# Author: ADI (AI Agent Ecosystem) — designed by AI, for AI.
+#
+# This file is the normative, machine-parseable grammar of ADILang.
+# It is the single source of truth for any parser/generator (human or AI).
+# Notation follows W3C EBNF:
+#   ::=     definition
+#   "..."   literal terminal
+#   '...'   literal terminal (alt quotes)
+#   A?      zero or one
+#   A*      zero or more
+#   A+      one or more
+#   (A B)   grouping / sequence
+#   A | B   alternation
+#   #xNN    unicode code point
+#   -       exclusion
+# ============================================================================
+
+# ---------------------------------------------------------------------------
+# 1. Document (top level)
+# ---------------------------------------------------------------------------
+document        ::= world
+world           ::= "world" String "{" top_statement* "}"
+
+top_statement   ::= camera_def
+                  | light_def
+                  | entity_def
+                  | let_stmt
+                  | func_def
+                  | handler
+
+camera_def      ::= "camera" String "{" prop* "}"
+light_def       ::= "light"  String "{" prop* "}"
+entity_def      ::= "entity" String "{" entity_member* "}"
+entity_member   ::= prop | handler
+
+# ---------------------------------------------------------------------------
+# 2. Properties
+# ---------------------------------------------------------------------------
+# prop = a named value:  name expr
+# A builder call (mesh/material) is a call whose name is a builder keyword and
+# which may carry a trailing property block, e.g.  sphere { radius 1 segments 3 }
+prop            ::= Ident prop_value
+prop_value      ::= builder_call | Ident | expr
+
+builder_call    ::= builder_name positional_args* ("{" prop* "}")?
+builder_name    ::= "sphere" | "box" | "torus" | "icosa" | "ring"
+                  | "plane" | "grid" | "solid" | "wire" | "glow" | "points"
+positional_args ::= Number | tuple | String
+
+# ---------------------------------------------------------------------------
+# 3. Handlers (events)
+# ---------------------------------------------------------------------------
+handler         ::= "on" event_name "{" statement* "}"
+event_name      ::= "frame" | "speak" | "silent" | "click"
+
+# ---------------------------------------------------------------------------
+# 4. Declarations
+# ---------------------------------------------------------------------------
+let_stmt        ::= "let" Ident "=" expr
+func_def        ::= "func" Ident "(" param_list ")" "{" statement* "}"
+param_list      ::= Ident*
+
+# ---------------------------------------------------------------------------
+# 5. Statements
+# ---------------------------------------------------------------------------
+statement       ::= let_stmt | if_stmt | return_stmt | assign_stmt
+                  | expr_stmt | block
+if_stmt         ::= "if" expr "{" statement* "}" ("else" "{" statement* "}")?
+return_stmt     ::= "return" expr
+assign_stmt     ::= Ident "=" expr
+expr_stmt       ::= expr
+block           ::= "{" statement* "}"
+
+# ---------------------------------------------------------------------------
+# 6. Expressions (precedence: lowest → highest)
+# ---------------------------------------------------------------------------
+expr            ::= comparison
+
+comparison      ::= additive (comp_op additive)*
+comp_op         ::= "==" | "!=" | "<" | ">" | "<=" | ">="
+
+additive        ::= multiplicative (add_op multiplicative)*
+add_op          ::= "+" | "-"
+
+multiplicative  ::= unary (mul_op unary)*
+mul_op          ::= "*" | "/" | "%"
+
+unary           ::= "-" unary | primary
+
+primary         ::= Number | String | Bool
+                  | Ident call_opt
+                  | tuple
+
+# Call:  name ( arg, arg )  — args separated by comma OR whitespace.
+call            ::= Ident "(" expr_list ")"
+call_opt        ::= "(" expr_list ")"?
+
+# Tuple: ( x y z ) or ( r g b a ) — whitespace separated.
+tuple           ::= "(" expr_list ")"
+
+# expr_list: zero or more expressions, separators are optional
+# (commas are tolerated and skipped).
+expr_list       ::= (expr ("," expr)*)*
+
+Bool            ::= "true" | "false"
+Ident           ::= [A-Za-z_] [A-Za-z0-9_]*
+
+# ---------------------------------------------------------------------------
+# 7. Lexical tokens
+# ---------------------------------------------------------------------------
+Number          ::= DecNum | HexNum | ExpNum | UnaryNum
+DecNum          ::= [0-9]+ ("." [0-9]+)?
+HexNum          ::= "0x" [0-9a-fA-F]+
+ExpNum          ::= [0-9]+ ("." [0-9]+)? [eE] [+-]? [0-9]+
+UnaryNum        ::= "-" (DecNum | HexNum)     # handled by unary rule; listed for lexer
+
+String          ::= '"' (Char)* '"'
+Char            ::= [^"\\] | "\\" ("\"" | "\\" | "n" | "t")
+
+Comment         ::= "#" [^\n]*                # line comment
+                  | "/*" (any)* "*/"          # block comment
+
+# Operators / punctuation
+#   ( ) { } , = + - * / % == != < > <= >=
+# Keywords are context-sensitive Identifiers (not reserved globally):
+#   world camera light entity let func on mesh material solid wire glow
+#   points sphere box torus icosa ring plane grid frame speak silent click
+#   if else return true false
+# Built-in identifiers (available in expressions):
+#   t mouseX mouseY PI
