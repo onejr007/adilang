@@ -5,10 +5,12 @@
 mod engine;
 mod ast;
 mod bytecode;
+pub mod checker;
+pub mod compactor;
 mod eval;
 mod lexer;
 mod math3d;
-mod parser;
+pub mod parser;
 mod registry;
 mod scene;
 

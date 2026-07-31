@@ -187,6 +187,40 @@ pub fn adilang_check(source: &str) -> Result<(), String> {
     Ok(())
 }
 
+/// Static analyzer ADILang (v1.7.0, roadmap §3 "adilang-check").
+/// Mengembalikan teks diagnostik baris-per-temuan berformat
+/// `severity|line|message|hint` (Error hanya bila syntax error → Err).
+/// Frontend/AI bisa memakainya untuk validasi sebelum eksekusi & sebagai
+/// sumber event "syntax_error".
+#[wasm_bindgen]
+pub fn adilang_check_diagnostics(source: &str) -> Result<String, String> {
+    let diags = crate::checker::check_src(source)?;
+    if diags.is_empty() {
+        return Ok("OK|0|bersih|tidak ada temuan".to_string());
+    }
+    let lines: Vec<String> = diags
+        .iter()
+        .map(|d| {
+            format!(
+                "{}|{}|{}|{}",
+                d.severity.as_str(),
+                d.line,
+                d.message,
+                d.hint
+            )
+        })
+        .collect();
+    Ok(lines.join("\n"))
+}
+
+/// Token compactor ADILang (v1.7.0, roadmap §3 "adilang-opt"): rename nama
+/// user ke 1–2 karakter + render ulang kompak (hemat token antar-agen LLM).
+/// Semantik dipertahankan (AST identik — lihat unit test compactor).
+#[wasm_bindgen]
+pub fn adilang_optimize(source: &str) -> Result<String, String> {
+    crate::compactor::optimize_src(source)
+}
+
 /// Debug: hitung jumlah entity setelah load.
 #[wasm_bindgen]
 pub fn adilang_debug_count() -> usize {

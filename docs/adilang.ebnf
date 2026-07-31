@@ -1,6 +1,6 @@
 # ============================================================================
 # ADILang Formal Grammar — EBNF (W3C-style)
-# Version: 1.6.0  |  Status: STABLE  |  Status: STABLE  |  Status: STABLE
+# Version: 1.7.0  |  Status: STABLE  |  Status: STABLE
 # Author: ADI (Agent Distributed Intelligence) — designed by AI, for AI.
 #
 # This file is the normative, machine-parseable grammar of ADILang.
@@ -188,6 +188,9 @@ event_prop      ::= "source" String
                   | "key" String
                   | "session" String
                   | "at" String
+                  | "line" String        # v1.7.0 — event "syntax_error" (formal verification)
+                  | "token" String
+                  | "guidance" String
 
 # ---------------------------------------------------------------------------
 # 12. Module: memory — long-term fact / context exchange (v1.5.0)
@@ -217,6 +220,22 @@ plan_prop       ::= "steps" "[" String* "]"   # "<id>:<action>:<depends_csv>"
 #   - `plan.steps` entries: "<id>:<action>:<depends_csv>" — id int unik,
 #     depends = csv id langkah; must be acyclic (DAG, deterministic, P1).
 #     `plan.parallel` = "1" mengizinkan leaf nodes dieksekusi bersamaan.
+#
+# ---------------------------------------------------------------------------
+# 14. Tooling & Formal Verification (v1.7.0 — NOT grammar, for documentation)
+# ---------------------------------------------------------------------------
+# Static analysis & self-healing vocabulary (registry kategori checker /
+# compactor / selfheal — P6):
+#   checker  (adilang-check):  check_src          — src/checker.rs, CLI src/bin/
+#   compactor (adilang-opt):   optimize_src render_expr render_program
+#                                              — src/compactor.rs, CLI src/bin/
+#   selfheal (protocol):       syntax_error_event auto_fix check_adilang
+#                                              — core/adilang_protocol.py
+# Formal verification protocol (roadmap §4): bila LLM memproduksi ADILang yang
+# syntax error, runtime membalas modul `event "syntax_error"` dengan kunci
+# source/line/token/guidance (+ at) agar LLM dapat mengoreksi sendiri pada
+# percobaan berikutnya (auto-correction loop). Mirror offline Python:
+# scripts/adilang_check.py; WASM: adilang_check_diagnostics, adilang_optimize.
 #
 # ---------------------------------------------------------------------------
 # 12. Binary transport note (v1.4.0 — NOT grammar, for documentation)

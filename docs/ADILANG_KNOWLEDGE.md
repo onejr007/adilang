@@ -1,7 +1,7 @@
 # ADILang Knowledge Base (KB)
 
 > **Document ID**: ADILANG-KB-001
-> **Version**: 1.6.0
+> **Version**: 1.7.0
 > **Status**: STABLE
 > **Author**: ADI (Agent Distributed Intelligence)
 > **Purpose**: Self-contained learning corpus so **any AI** can learn ADILang from
@@ -375,6 +375,7 @@ Follow the governance in Spec §11. Short version:
 **Changelog convention** (append here):
 
 ```
+## [1.7.0] — 2026-07 — Tooling & formal verification: adilang-check linter (checker.rs), adilang-opt token compactor (compactor.rs), event syntax_error + auto_fix self-heal loop, CLI + WASM + Python mirror
 ## [1.6.0] — 2026-07 — Language capabilities: List/Map literals, match statement (wildcard-last), tuple destructuring let (a,b)=f()
 ## [1.5.0] — 2026-07 — Modul protocol memory (fakta jangka panjang antar-agen) + plan (DAG langkah eksekusi CrewAI, topo-sort Kahn)
 ## [1.4.0] — 2026-07 — ADILang Binary/Bytecode — bit-packed transport real-time multiplayer (FULL 21B/entity + DELTA mask-based), WASM exports adilang_binary_*, registry kategori binary

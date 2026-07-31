@@ -12,7 +12,7 @@ use crate::scene::{MaterialKind, MeshKind};
 /// Versi kanonik bahasa ADILang — sumber tunggal kebenaran untuk versi.
 /// Sinkron dengan: Cargo.toml, docs/LANGUAGE.md, docs/adilang.ebnf,
 /// docs/ADILANG_KNOWLEDGE.md, dan core/adilang_protocol.py (backend ADI).
-pub const VERSION: &str = "1.6.0";
+pub const VERSION: &str = "1.7.0";
 
 // ── SUMBER TUNGGAL KEBENARAN untuk builder mesh/material ────────────────────
 // Dipakai oleh: parser.rs `is_builder()`, eval.rs `apply_mesh()/apply_material()`,
@@ -119,11 +119,17 @@ pub fn registry_text() -> String {
             "operator: + - * / % == != < > <= >= = =>\n",
             "delim: ( ) { } , [ ] :\n",
             "protocol: intent reply task event world memory plan\n",
-            "protocolkey: mode payload verb content recs world assign input expect source key session at topic fact confidence steps parallel\n",
+            "protocolkey: mode payload verb content recs world assign input expect source key session at topic fact confidence steps parallel line token guidance\n",
             "verb: ask inform command greet system\n",
             // ADILang Binary/Bytecode (v1.4.0) — API transport real-time
             // (bit-packing + delta, Rust → WASM → WebSocket antar-client).
             "binary: encode_full decode_full encode_delta apply_delta packet_kind packet_version packet_entity_count binary_spec\n",
+            // ADILang Tooling (v1.7.0) — linter & token compactor. Sumber
+            // aktual: pub fn di checker.rs / compactor.rs + def di
+            // core/adilang_protocol.py (diverifikasi scripts/check_adilang_registry.py).
+            "checker: check_src\n",
+            "compactor: optimize_src render_expr render_program\n",
+            "selfheal: syntax_error_event auto_fix check_adilang\n",
         )
     )
 }
@@ -163,6 +169,19 @@ mod tests {
         // Verbs tertutup
         for kw in ["ask", "inform", "command", "greet", "system"] {
             assert!(r.contains(kw), "registry harus memuat verb '{kw}'");
+        }
+    }
+
+    #[test]
+    fn registry_meliputi_tooling_v170() {
+        let r = registry_text();
+        // adilang-check (checker.rs)
+        assert!(r.contains("checker: check_src"), "registry harus memuat kategori checker");
+        // adilang-opt (compactor.rs)
+        assert!(r.contains("compactor: optimize_src"), "registry harus memuat kategori compactor");
+        // self-heal protocol (core/adilang_protocol.py)
+        for kw in ["syntax_error_event", "auto_fix", "check_adilang"] {
+            assert!(r.contains(kw), "registry harus memuat self-heal '{kw}'");
         }
     }
 

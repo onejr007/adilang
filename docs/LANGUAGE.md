@@ -1,8 +1,8 @@
-# ADILang Language Specification v1.6
+# ADILang Language Specification v1.7
 
 > **Document ID**: ADILANG-SPEC-001
 > **Status**: STABLE
-> **Version**: 1.6.0
+> **Version**: 1.7.0
 > **Author**: ADI (Agent Distributed Intelligence)
 > **Authorship**: Designed, specified, and implemented entirely by AI (ADI).
 > **Audience**: AI systems (primary), the ADI backend (intent/reply/task/event
@@ -484,6 +484,8 @@ Exposed via wasm-bindgen (`src/wasm_api.rs`):
 | `adilang_start(canvas_id)` | `Result<(), String>` | init engine + start loop |
 | `adilang_load(source)` | `Result<(), String>` | hot-reload world |
 | `adilang_check(source)` | `Result<(), String>` | syntax check |
+| `adilang_check_diagnostics(source)` | `Result<String, String>` | static analyzer → `severity|line|message|hint` per baris (v1.7) |
+| `adilang_optimize(source)` | `Result<String, String>` | token compactor → source kompak, semantik terjaga (v1.7) |
 | `adilang_speak()` | `Result<(), String>` | fire `speak` |
 | `adilang_silent()` | `Result<(), String>` | fire `silent` |
 | `adilang_debug_count()` | `usize` | entity count (diagnostics) |
@@ -666,6 +668,9 @@ error, memory write). Useful for AI-to-AI audit and telemetry.
 | `key` | String | User key involved (optional). |
 | `session` | String | Session id involved (optional). |
 | `at` | String | ISO-8601 UTC timestamp. |
+| `line` | String (v1.7.0) | Baris error — dipakai modul `event "syntax_error"` (formal verification). |
+| `token` | String (v1.7.0) | Token yang salah — dipakai modul `event "syntax_error"`. |
+| `guidance` | String (v1.7.0) | Petunjuk perbaikan — dipakai modul `event "syntax_error"`. |
 
 ```
 event "message" {
@@ -725,6 +730,34 @@ plan "build_feature" {
 ref exists; graph acyclic (guaranteed by `plan_topological_order`, Kahn).
 **Semantics**: `plan_topological_order(steps)` returns waves of independent
 steps — deterministic (P1) and always terminating.
+
+## 16. Tooling & Formal Verification (v1.7.0)
+
+Three tooling layers make ADILang verifiable and self-healing (roadmap §3–§4):
+
+| Tool | Artifact | Purpose |
+|---|---|---|
+| **adilang-check** | `src/checker.rs` (+ CLI `src/bin/adilang_check.rs`, mirror `scripts/adilang_check.py`, WASM `adilang_check_diagnostics`) | Offline static analyzer: unknown ident/function/property, assign-to-undeclared, builtin arity, light-type enum — with `severity/line/message/hint`. Vocabulary from `registry_text()` (P6 single source). |
+| **adilang-opt** | `src/compactor.rs` (+ CLI `src/bin/adilang_opt.rs`, WASM `adilang_optimize`) | Token compactor: bijective rename of user-bound names to 1–2 chars + compact re-render. Semantics guaranteed (AST roundtrip + eval-state tests). |
+| **self-heal** | `core/adilang_protocol.py`: `syntax_error_event`, `auto_fix`, `check_adilang` | Formal verification return code: on syntax error the runtime replies `event "syntax_error" { source line token guidance }` and `auto_fix` heuristically repairs common LLM mistakes (quotes, lowercase keywords, brace balance). |
+
+### 16.1 syntax_error event
+
+```
+event "syntax_error" {
+    source "adilang.world"
+    line "3"
+    token "sphre"
+    guidance "Periksa kosakata tertutup (registry) ..."
+}
+```
+
+The auto-correction loop: LLM emits ADILang → parse fails → runtime returns the
+`syntax_error` event (baris + token + guidance) → LLM fixes and retries. The
+registry enumerates the tooling vocabulary as `checker`, `compactor`, `selfheal`
+categories (P6).
+
+---
 
 ### 15.7 Conformance for protocol modules
 
