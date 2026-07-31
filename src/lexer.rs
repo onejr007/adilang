@@ -11,6 +11,10 @@ pub enum TokKind {
     RParen,
     LBrace,
     RBrace,
+    LBracket,     // [ — list literal (v1.6.0)
+    RBracket,     // ]
+    Colon,        // : — map literal key separator (v1.6.0)
+    Arrow,        // => — match arm (v1.6.0)
     Comma,
     Assign,       // =
     Plus,         // +
@@ -173,9 +177,16 @@ pub fn tokenize(src: &str) -> Result<Vec<Token>, String> {
             ')' => { tokens.push(Token { kind: TokKind::RParen, line, col }); bump(&mut i, &mut line, &mut col); }
             '{' => { tokens.push(Token { kind: TokKind::LBrace, line, col }); bump(&mut i, &mut line, &mut col); }
             '}' => { tokens.push(Token { kind: TokKind::RBrace, line, col }); bump(&mut i, &mut line, &mut col); }
+            '[' => { tokens.push(Token { kind: TokKind::LBracket, line, col }); bump(&mut i, &mut line, &mut col); }
+            ']' => { tokens.push(Token { kind: TokKind::RBracket, line, col }); bump(&mut i, &mut line, &mut col); }
+            ':' => { tokens.push(Token { kind: TokKind::Colon, line, col }); bump(&mut i, &mut line, &mut col); }
             ',' => { tokens.push(Token { kind: TokKind::Comma, line, col }); bump(&mut i, &mut line, &mut col); }
             '=' => {
-                if i + 1 < chars.len() && chars[i + 1] == '=' {
+                if i + 1 < chars.len() && chars[i + 1] == '>' {
+                    tokens.push(Token { kind: TokKind::Arrow, line, col });
+                    bump(&mut i, &mut line, &mut col);
+                    bump(&mut i, &mut line, &mut col);
+                } else if i + 1 < chars.len() && chars[i + 1] == '=' {
                     tokens.push(Token { kind: TokKind::Eq, line, col });
                     bump(&mut i, &mut line, &mut col);
                     bump(&mut i, &mut line, &mut col);

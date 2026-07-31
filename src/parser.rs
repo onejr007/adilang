@@ -224,10 +224,103 @@ impl Parser {
             TokKind::Ident(kw) => match kw.as_str() {
                 "let" => {
                     self.advance();
+                    // Tuple destructuring (v1.6.0): let (a, b) = expr
+                    if self.peek() == &TokKind::LParen {
+                        self.advance();
+                        let mut names = Vec::new();
+                        while self.peek() != &TokKind::RParen {
+                            if let TokKind::Ident(n) = self.peek().clone() {
+                                names.push(n);
+                                self.advance();
+                            } else if self.peek() == &TokKind::Comma {
+                                self.advance();
+                            } else {
+                                return Err(format!(
+                                    "Ekspektasi nama variabel di destructuring, baris {}",
+                                    self.line()
+                                ));
+                            }
+                        }
+                        self.advance(); // )
+                        self.expect(&TokKind::Assign, "'='")?;
+                        let value = self.parse_expr()?;
+                        if names.is_empty() {
+                            return Err("Destructuring kosong: butuh minimal satu nama".into());
+                        }
+                        return Ok(Stmt::LetDestructure { names, value });
+                    }
                     let name = self.expect_ident("nama variabel")?;
                     self.expect(&TokKind::Assign, "'='")?;
                     let value = self.parse_expr()?;
                     Ok(Stmt::Let { name, value })
+                }
+                "match" => {
+                    // match subject { "pat" => { ... } _ => { ... } } (v1.6.0)
+                    self.advance();
+                    let subject = self.parse_expr()?;
+                    self.expect(&TokKind::LBrace, "'{'")?;
+                    let mut arms = Vec::new();
+                    let mut seen_wildcard = false;
+                    while self.peek() != &TokKind::RBrace {
+                        if self.peek() == &TokKind::Eof {
+                            return Err(format!("match tidak ditutup, baris {}", self.line()));
+                        }
+                        if seen_wildcard {
+                            return Err(format!(
+                                "Wildcard '_' wajib arm TERAKHIR di match (baris {})",
+                                self.line()
+                            ));
+                        }
+                        // pattern: "str" | number | _
+                        let pattern = match self.peek().clone() {
+                            TokKind::Str(s) => {
+                                self.advance();
+                                MatchPattern::Str(s)
+                            }
+                            TokKind::Num(n) => {
+                                self.advance();
+                                MatchPattern::Num(n)
+                            }
+                            TokKind::Minus => {
+                                self.advance();
+                                let n = match self.peek().clone() {
+                                    TokKind::Num(n) => n,
+                                    _ => return Err(format!(
+                                        "Ekspektasi angka setelah '-' di pattern match, baris {}",
+                                        self.line()
+                                    )),
+                                };
+                                self.advance();
+                                MatchPattern::Num(-n)
+                            }
+                            TokKind::Ident(id) if id == "_" => {
+                                self.advance();
+                                seen_wildcard = true;
+                                MatchPattern::Wildcard
+                            }
+                            other => {
+                                return Err(format!(
+                                    "Pattern match tidak valid: {:?} di baris {}",
+                                    other,
+                                    self.line()
+                                ))
+                            }
+                        };
+                        self.expect(&TokKind::Arrow, "'=>' (arm match)")?;
+                        // Body arm: blok `{ ... }` ATAU satu statement/ekspresi
+                        // tanpa kurung (roadmap: `"ask" => process_query()`).
+                        let body = if self.peek() == &TokKind::LBrace {
+                            self.parse_block()?
+                        } else {
+                            vec![self.parse_stmt()?]
+                        };
+                        arms.push(MatchArm { pattern, body });
+                    }
+                    self.advance(); // }
+                    if arms.is_empty() {
+                        return Err("match tanpa arm".into());
+                    }
+                    Ok(Stmt::Match { subject, arms })
                 }
                 "if" => {
                     self.advance();
@@ -440,6 +533,43 @@ impl Parser {
                 let items = self.parse_paren_list()?;
                 Ok(Expr::Tuple(items))
             }
+            TokKind::LBracket => {
+                // List literal (v1.6.0): [ expr, expr ] — koma opsional
+                self.advance();
+                let mut items = Vec::new();
+                while self.peek() != &TokKind::RBracket {
+                    if self.peek() == &TokKind::Eof {
+                        return Err(format!("']' tidak ditutup, baris {}", self.line()));
+                    }
+                    if self.peek() == &TokKind::Comma {
+                        self.advance();
+                        continue;
+                    }
+                    items.push(self.parse_expr()?);
+                }
+                self.advance(); // ]
+                Ok(Expr::List(items))
+            }
+            TokKind::LBrace => {
+                // Map literal (v1.6.0): { key: expr, key2: expr }
+                self.advance();
+                let mut pairs = Vec::new();
+                while self.peek() != &TokKind::RBrace {
+                    if self.peek() == &TokKind::Eof {
+                        return Err(format!("map tidak ditutup, baris {}", self.line()));
+                    }
+                    if self.peek() == &TokKind::Comma {
+                        self.advance();
+                        continue;
+                    }
+                    let key = self.expect_ident("kunci map")?;
+                    self.expect(&TokKind::Colon, "':' (kunci map)")?;
+                    let val = self.parse_expr()?;
+                    pairs.push((key, val));
+                }
+                self.advance(); // }
+                Ok(Expr::Map(pairs))
+            }
             other => Err(format!("Ekspektasi ekspresi, dapat {:?} di baris {}", other, self.line())),
         }
     }
@@ -560,6 +690,116 @@ setPos(2.1 * cos(a), 0.35 * sin(2.3 * t), 2.1 * sin(a)) } } }";
         "#;
         let prog = parse(src).expect("for loop harus di-parse");
         assert_eq!(prog.items.len(), 1);
+    }
+
+    #[test]
+    fn parse_list_and_map_literals() {
+        // v1.6.0: List [ ... ] dan Map { key: value } dalam ekspresi.
+        let src = r#"
+            world "T" {
+                entity "e" {
+                    on frame {
+                        let tags = ["fastapi", "crewai", "adilang"]
+                        let cfg = { timeout: 30, retry: 3 }
+                    }
+                }
+            }
+        "#;
+        let prog = parse(src).expect("list/map harus di-parse");
+        assert_eq!(prog.items.len(), 1);
+    }
+
+    #[test]
+    fn parse_match_statement() {
+        // v1.6.0: match subject { "pat" => { ... } _ => { ... } }
+        let src = r#"
+            world "T" {
+                entity "e" {
+                    on frame {
+                        match verb {
+                            "ask" => { rotate(0.1, (0 1 0)) }
+                            "command" => { rotate(0.2, (0 1 0)) }
+                            _ => { rotate(0.05, (0 1 0)) }
+                        }
+                    }
+                }
+            }
+        "#;
+        let prog = parse(src).expect("match harus di-parse");
+        assert_eq!(prog.items.len(), 1);
+    }
+
+    #[test]
+    fn parse_match_numeric_pattern_and_no_wildcard() {
+        // Angka + unary minus sebagai pattern, tanpa wildcard tetap boleh parse
+        let src = r#"
+            world "T" {
+                entity "e" {
+                    on frame {
+                        match n {
+                            1 => { rotate(0.1, (0 1 0)) }
+                            -2 => { rotate(0.2, (0 1 0)) }
+                        }
+                    }
+                }
+            }
+        "#;
+        let prog = parse(src).expect("match numerik harus di-parse");
+        assert_eq!(prog.items.len(), 1);
+    }
+
+    #[test]
+    fn parse_match_arm_bare_expression() {
+        // Roadmap: arm tanpa kurung `"ask" => process_query()` — body = satu
+        // statement/ekspresi (bukan wajib blok `{ ... }`).
+        let src = r#"
+            world "T" {
+                entity "e" {
+                    on frame {
+                        match verb {
+                            "ask" => rotate(0.1, (0 1 0))
+                            _ => rotate(0.2, (0 1 0))
+                        }
+                    }
+                }
+            }
+        "#;
+        let prog = parse(src).expect("match arm tanpa kurung harus di-parse");
+        assert_eq!(prog.items.len(), 1);
+    }
+
+    #[test]
+    fn parse_match_wildcard_must_be_last() {
+        // Docstring MatchPattern: wildcard wajib arm terakhir — harus di-enforce.
+        let src = "world \"w\" { entity \"e\" { on frame { match x { _ => { } \"a\" => { } } } } }";
+        let res = parse(src);
+        assert!(res.is_err(), "wildcard sebelum arm lain harus ditolak");
+        let msg = res.unwrap_err();
+        assert!(msg.contains("TERAKHIR"), "error harus menyebut wildcard-last: {msg}");
+    }
+
+    #[test]
+    fn parse_match_requires_arrow() {
+        let src = "world \"w\" { entity \"e\" { on frame { match x { \"a\" { } } } } }";
+        let res = parse(src);
+        assert!(res.is_err(), "arm tanpa '=>' harus ditolak");
+    }
+
+    #[test]
+    fn parse_tuple_destructuring() {
+        // v1.6.0: let (code, msg) = get_status()
+        let src = r#"
+            world "T" {
+                func get_status() { return (200, "OK") }
+                entity "e" {
+                    on frame {
+                        let (code, msg) = get_status()
+                    }
+                }
+            }
+        "#;
+        let prog = parse(src).expect("destructuring harus di-parse");
+        assert_eq!(prog.items.len(), 2);
     }
 
     #[test]
@@ -688,7 +928,9 @@ setPos(2.1 * cos(a), 0.35 * sin(2.3 * t), 2.1 * sin(a)) } } }";
         // hasil Ok atau Err sama-sama sah, yang penting tidak crash.
         let base = include_str!("../worlds/default.adi");
         let base: Vec<char> = base.chars().collect();
-        let alphabet: Vec<char> = "(){}\",.=+-*/%<>_0123456789abcdefghijklmnopqrstuvwxyz "
+        // v1.6.0: sertakan token baru [ ] : => (=> dibentuk '='+'>') agar mutasi
+        // benar-benar melatih cabang lexer baru (list/map/match).
+        let alphabet: Vec<char> = "(){}\",.=+-*/%<>_:[]0123456789abcdefghijklmnopqrstuvwxyz "
             .chars()
             .collect();
         let mut rng = Lcg::new(0xC0FFEE);

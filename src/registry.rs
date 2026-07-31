@@ -12,7 +12,7 @@ use crate::scene::{MaterialKind, MeshKind};
 /// Versi kanonik bahasa ADILang — sumber tunggal kebenaran untuk versi.
 /// Sinkron dengan: Cargo.toml, docs/LANGUAGE.md, docs/adilang.ebnf,
 /// docs/ADILANG_KNOWLEDGE.md, dan core/adilang_protocol.py (backend ADI).
-pub const VERSION: &str = "1.5.0";
+pub const VERSION: &str = "1.6.0";
 
 // ── SUMBER TUNGGAL KEBENARAN untuk builder mesh/material ────────────────────
 // Dipakai oleh: parser.rs `is_builder()`, eval.rs `apply_mesh()/apply_material()`,
@@ -114,10 +114,10 @@ pub fn registry_text() -> String {
             "entityprop: pos rot scale mesh material\n",
             "lightkind: point ambient\n",
             "declaration: world camera light entity let func on\n",
-            "statement: let if return while for\n",
+            "statement: let if return while for match\n",
             "keyword: true false\n",
-            "operator: + - * / % == != < > <= >= =\n",
-            "delim: ( ) { } ,\n",
+            "operator: + - * / % == != < > <= >= = =>\n",
+            "delim: ( ) { } , [ ] :\n",
             "protocol: intent reply task event world memory plan\n",
             "protocolkey: mode payload verb content recs world assign input expect source key session at topic fact confidence steps parallel\n",
             "verb: ask inform command greet system\n",

@@ -23,6 +23,12 @@ pub enum Expr {
     Bool(bool),
     /// Tuple: (x y z) atau (r g b a)
     Tuple(Vec<Expr>),
+    /// List literal (v1.6.0): [ 1 2 3 ] atau ["a", "b"] — elemen heterogen
+    /// diperbolehkan (nilai didorong ke Value::List pada evaluasi).
+    List(Vec<Expr>),
+    /// Map literal (v1.6.0): { key: expr, key2: expr } — pasangan (String, Expr)
+    /// urutan sumber DI-PERTAHANKAN (deterministik, P1).
+    Map(Vec<(String, Expr)>),
     Ident(String),
     Call {
         name: String,
@@ -44,9 +50,28 @@ pub struct Prop {
     pub value: Expr,
 }
 
+/// Pola arm `match` (v1.6.0): literal string/angka, atau wildcard `_`.
+#[derive(Debug, Clone, PartialEq)]
+pub enum MatchPattern {
+    Str(String),
+    Num(f64),
+    /// `_` — catch-all (wajib terakhir bila ada).
+    Wildcard,
+}
+
+/// Satu arm `match`: pattern => body.
+#[derive(Debug, Clone, PartialEq)]
+pub struct MatchArm {
+    pub pattern: MatchPattern,
+    pub body: Vec<Stmt>,
+}
+
 #[derive(Debug, Clone, PartialEq)]
 pub enum Stmt {
     Let { name: String, value: Expr },
+    /// Tuple destructuring (v1.6.0): let (a, b) = f() — bind elemen tuple ke
+    /// beberapa nama sekaligus. Panjang names HARUS cocok dgn tuple hasil.
+    LetDestructure { names: Vec<String>, value: Expr },
     Assign { name: String, value: Expr },
     ExprStmt(Expr),
     Return(Expr),
@@ -62,6 +87,11 @@ pub enum Stmt {
     /// `for x in start end { ... }` — iterasi numerik [start, end), step 1.
     /// Dibatasi evaluator (MAX_LOOP_ITERATIONS) agar deterministik (P1).
     For { var: String, start: Expr, end: Expr, body: Vec<Stmt> },
+    /// `match subject { pat => { ... } pat2 => { ... } _ => { ... } }` (v1.6.0).
+    Match {
+        subject: Expr,
+        arms: Vec<MatchArm>,
+    },
 }
 
 #[derive(Debug, Clone, PartialEq)]

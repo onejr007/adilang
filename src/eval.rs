@@ -12,6 +12,10 @@ pub enum Value {
     Str(String),
     Bool(bool),
     Tuple(Vec<f64>),
+    /// List literal (v1.6.0): elemen heterogen diizinkan.
+    List(Vec<Value>),
+    /// Map literal (v1.6.0): urutan pasangan DI-PERTAHANKAN (deterministik P1).
+    Map(Vec<(String, Value)>),
     Null,
 }
 
@@ -280,6 +284,20 @@ impl Interpreter {
                 }
                 Ok(Value::Tuple(out))
             }
+            Expr::List(items) => {
+                let mut out = Vec::new();
+                for it in items {
+                    out.push(self.eval_expr(it)?);
+                }
+                Ok(Value::List(out))
+            }
+            Expr::Map(pairs) => {
+                let mut out = Vec::new();
+                for (k, v) in pairs {
+                    out.push((k.clone(), self.eval_expr(v)?));
+                }
+                Ok(Value::Map(out))
+            }
             Expr::Ident(name) => {
                 match name.as_str() {
                     "t" => Ok(Value::Num(self.t)),
@@ -371,6 +389,36 @@ impl Interpreter {
                 }
                 Ok(None)
             }
+            Stmt::LetDestructure { names, value } => {
+                // Tuple destructuring (v1.6.0): let (a, b) = expr.
+                // Sumber boleh Value::Tuple (numerik, untuk vec3) ATAU
+                // Value::List (heterogen — roadmap: get_status() -> [200, "OK"]).
+                let v = self.eval_expr(value)?;
+                let items: Vec<Value> = match &v {
+                    Value::Tuple(t) => t.iter().map(|n| Value::Num(*n)).collect(),
+                    Value::List(l) => l.clone(),
+                    other => return Err(format!(
+                        "Destructuring butuh tuple/list, dapat {other:?}"
+                    )),
+                };
+                if items.len() != names.len() {
+                    return Err(format!(
+                        "Destructuring: {} elemen vs {} nama (harus sama panjang)",
+                        items.len(),
+                        names.len()
+                    ));
+                }
+                if let Some(scope) = self.scopes.last_mut() {
+                    for (i, n) in names.iter().enumerate() {
+                        scope.insert(n.clone(), items[i].clone());
+                    }
+                } else {
+                    for (i, n) in names.iter().enumerate() {
+                        self.globals.insert(n.clone(), items[i].clone());
+                    }
+                }
+                Ok(None)
+            }
             Stmt::Assign { name, value } => {
                 let v = self.eval_expr(value)?;
                 // Assignment menarget scope TERDEKAT yang memiliki nama tsb
@@ -458,6 +506,25 @@ impl Interpreter {
                     }
                 }
                 Ok(None)
+            }
+            Stmt::Match { subject, arms } => {
+                // match subject { "pat" => { ... } _ => { ... } } (v1.6.0).
+                // Arm pertama yang cocok dieksekusi (urutan sumber). Bila tidak
+                // ada yang cocok dan tidak ada wildcard → error deterministik.
+                let subj = self.eval_expr(subject)?;
+                for arm in arms {
+                    let matched = match &arm.pattern {
+                        crate::ast::MatchPattern::Wildcard => true,
+                        crate::ast::MatchPattern::Str(p) => matches!(&subj, Value::Str(s) if s == p),
+                        crate::ast::MatchPattern::Num(p) => matches!(&subj, Value::Num(n) if n == p),
+                    };
+                    if matched {
+                        return self.run_block(&arm.body);
+                    }
+                }
+                Err(format!(
+                    "match tanpa arm yang cocok: {subj:?} (tidak ada wildcard)"
+                ))
             }
         }
     }
@@ -720,6 +787,201 @@ mod tests {
         let mut interp = Interpreter::new("T".into());
         interp.load(prog).unwrap();
         assert_eq!(interp.globals.get("x"), Some(&Value::Num(14.0)));
+    }
+
+    // ─── v1.6.0: List / Map / match / destructuring ──────────────────────────
+
+    #[test]
+    fn eval_list_literal() {
+        let src = r#"world "T" { let tags = ["a", "b"] }"#;
+        let prog = parse(src).unwrap();
+        let mut interp = Interpreter::new("T".into());
+        interp.load(prog).unwrap();
+        assert_eq!(
+            interp.globals.get("tags"),
+            Some(&Value::List(vec![Value::Str("a".into()), Value::Str("b".into())]))
+        );
+    }
+
+    #[test]
+    fn eval_map_literal_preserves_order() {
+        let src = r#"world "T" { let cfg = { timeout: 30, retry: 3 } }"#;
+        let prog = parse(src).unwrap();
+        let mut interp = Interpreter::new("T".into());
+        interp.load(prog).unwrap();
+        assert_eq!(
+            interp.globals.get("cfg"),
+            Some(&Value::Map(vec![
+                ("timeout".to_string(), Value::Num(30.0)),
+                ("retry".to_string(), Value::Num(3.0)),
+            ]))
+        );
+    }
+
+    #[test]
+    fn eval_match_string_arms() {
+        let src = r#"
+            world "T" {
+                let verb = "ask"
+                let out = 0
+                entity "e" {
+                    on frame {
+                        match verb {
+                            "ask" => { out = 10 }
+                            _ => { out = 99 }
+                        }
+                    }
+                }
+            }
+        "#;
+        let prog = parse(src).unwrap();
+        let mut interp = Interpreter::new("T".into());
+        interp.load(prog).unwrap();
+        let handlers = interp.world.handlers_for(crate::ast::EventKind::Frame, "e");
+        let body: Vec<Stmt> = handlers.iter().flat_map(|h| h.body.clone()).collect();
+        interp.run_handler(Some("e".into()), &body).unwrap();
+        assert_eq!(interp.globals.get("out"), Some(&Value::Num(10.0)));
+    }
+
+    #[test]
+    fn eval_match_wildcard_fallback() {
+        let src = r#"
+            world "T" {
+                let verb = "command"
+                let out = 0
+                entity "e" {
+                    on frame {
+                        match verb {
+                            "ask" => { out = 10 }
+                            _ => { out = 42 }
+                        }
+                    }
+                }
+            }
+        "#;
+        let prog = parse(src).unwrap();
+        let mut interp = Interpreter::new("T".into());
+        interp.load(prog).unwrap();
+        let handlers = interp.world.handlers_for(crate::ast::EventKind::Frame, "e");
+        let body: Vec<Stmt> = handlers.iter().flat_map(|h| h.body.clone()).collect();
+        interp.run_handler(Some("e".into()), &body).unwrap();
+        assert_eq!(interp.globals.get("out"), Some(&Value::Num(42.0)));
+    }
+
+    #[test]
+    fn eval_match_numeric_arm() {
+        let src = r#"
+            world "T" {
+                let n = 2
+                let out = 0
+                entity "e" {
+                    on frame {
+                        match n {
+                            1 => { out = 1 }
+                            2 => { out = 2 }
+                            _ => { out = 99 }
+                        }
+                    }
+                }
+            }
+        "#;
+        let prog = parse(src).unwrap();
+        let mut interp = Interpreter::new("T".into());
+        interp.load(prog).unwrap();
+        let handlers = interp.world.handlers_for(crate::ast::EventKind::Frame, "e");
+        let body: Vec<Stmt> = handlers.iter().flat_map(|h| h.body.clone()).collect();
+        interp.run_handler(Some("e".into()), &body).unwrap();
+        assert_eq!(interp.globals.get("out"), Some(&Value::Num(2.0)));
+    }
+
+    #[test]
+    fn eval_match_no_arm_matches_errors() {
+        let src = r#"
+            world "T" {
+                let verb = "nani"
+                entity "e" {
+                    on frame {
+                        match verb {
+                            "ask" => { rotate(0.1, (0 1 0)) }
+                        }
+                    }
+                }
+            }
+        "#;
+        let prog = parse(src).unwrap();
+        let mut interp = Interpreter::new("T".into());
+        interp.load(prog).unwrap();
+        let handlers = interp.world.handlers_for(crate::ast::EventKind::Frame, "e");
+        let body: Vec<Stmt> = handlers.iter().flat_map(|h| h.body.clone()).collect();
+        let res = interp.run_handler(Some("e".into()), &body);
+        assert!(res.is_err(), "match tanpa arm cocok harus error");
+    }
+
+    #[test]
+    fn eval_tuple_destructuring() {
+        let src = r#"
+            world "T" {
+                entity "e" {
+                    on frame {
+                        let (a, b) = (3, 7)
+                        scaleBy(a * b)
+                    }
+                }
+            }
+        "#;
+        let prog = parse(src).unwrap();
+        let mut interp = Interpreter::new("T".into());
+        interp.load(prog).unwrap();
+        let handlers = interp.world.handlers_for(crate::ast::EventKind::Frame, "e");
+        let body: Vec<Stmt> = handlers.iter().flat_map(|h| h.body.clone()).collect();
+        interp.run_handler(Some("e".into()), &body).unwrap();
+        let e = interp.world.entity("e").unwrap();
+        assert_eq!(e.transform.scale, [21.0, 21.0, 21.0]);
+    }
+
+    #[test]
+    fn eval_destructuring_heterogeneous_list() {
+        // Roadmap: get_status() mengembalikan nilai jamak (code + msg).
+        // Tuple spec = vektor numerik; untuk campuran str+num pakai List literal.
+        let src = r#"
+            world "T" {
+                func get_status() { return [200, "OK"] }
+                entity "e" {
+                    on frame {
+                        let (code, msg) = get_status()
+                        scaleBy(code)
+                    }
+                }
+            }
+        "#;
+        let prog = parse(src).unwrap();
+        let mut interp = Interpreter::new("T".into());
+        interp.load(prog).unwrap();
+        let handlers = interp.world.handlers_for(crate::ast::EventKind::Frame, "e");
+        let body: Vec<Stmt> = handlers.iter().flat_map(|h| h.body.clone()).collect();
+        interp.run_handler(Some("e".into()), &body).unwrap();
+        let e = interp.world.entity("e").unwrap();
+        assert_eq!(e.transform.scale, [200.0, 200.0, 200.0]);
+    }
+
+    #[test]
+    fn eval_destructuring_mismatch_errors() {
+        let src = r#"
+            world "T" {
+                entity "e" {
+                    on frame {
+                        let (a, b) = (1, 2, 3)
+                    }
+                }
+            }
+        "#;
+        let prog = parse(src).unwrap();
+        let mut interp = Interpreter::new("T".into());
+        interp.load(prog).unwrap();
+        let handlers = interp.world.handlers_for(crate::ast::EventKind::Frame, "e");
+        let body: Vec<Stmt> = handlers.iter().flat_map(|h| h.body.clone()).collect();
+        let res = interp.run_handler(Some("e".into()), &body);
+        assert!(res.is_err(), "panjang tuple ≠ nama harus error");
     }
 
     // ─── Local scoping (spec LANGUAGE.md §7 / KB §6) ───────────────────────

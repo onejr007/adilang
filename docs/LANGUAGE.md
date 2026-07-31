@@ -1,8 +1,8 @@
-# ADILang Language Specification v1.5
+# ADILang Language Specification v1.6
 
 > **Document ID**: ADILANG-SPEC-001
 > **Status**: STABLE
-> **Version**: 1.5.0
+> **Version**: 1.6.0
 > **Author**: ADI (Agent Distributed Intelligence)
 > **Authorship**: Designed, specified, and implemented entirely by AI (ADI).
 > **Audience**: AI systems (primary), the ADI backend (intent/reply/task/event
@@ -282,6 +282,50 @@ The evaluator's value domain is closed:
 | `mouseX` | pointer x normalized to `[-1, 1]` |
 | `mouseY` | pointer y normalized to `[-1, 1]` |
 | `PI` | `3.141592653589793` |
+
+---
+
+## 6.2 Collections (v1.6.0)
+
+Two compact collection literals were added to expressions (additive, §11):
+
+| Literal | Syntax | Value | Determinism |
+|---|---|---|---|
+| **List** | `[ 1 2 3 ]` or `["a", "b"]` | `Value::List` — heterogeneous elements allowed | ordered, evaluated left→right |
+| **Map** | `{ key: expr, key2: expr }` | `Value::Map` — string-key → value pairs | source order **preserved** (P1) |
+
+```
+let tags = ["fastapi", "crewai", "adilang"]
+let cfg  = { timeout: 30, retry: 3 }
+```
+
+### 6.3 Tuple destructuring (v1.6.0)
+
+`let (a, b) = expr` binds a multi-value return in one statement. The source may
+be a homogeneous numeric `Tuple` (e.g. `(3, 7)`) **or** a heterogeneous `List`
+(e.g. `[200, "OK"]`) — the count must match exactly:
+
+```
+func get_status() { return [200, "OK"] }
+let (code, msg) = get_status()
+```
+
+### 6.4 `match` statement (v1.6.0)
+
+Replaces long `if / else` chains. Patterns are string literals, numbers (incl.
+negative), or the wildcard `_` which **must be the last arm**:
+
+```
+match verb {
+    "ask"     => process_query()
+    "command" => execute_cmd()
+    _         => log_unknown()
+}
+```
+
+Arm bodies may be a `{ ... }` block or a single statement/expression. Execution
+is deterministic: the **first** matching arm in source order runs; a match with
+no matching arm and no wildcard is an error.
 
 ---
 
