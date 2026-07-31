@@ -17,7 +17,7 @@
 ## 0. TL;DR — What is ADILang?
 
 ADILang is a tiny, whitespace-insensitive, context-keyword **protocol / IR language**
-used across the **ADI (Agent Distributed Intelligence)** ecosystem. It has **five
+used across the **ADI (Agent Distributed Intelligence)** ecosystem. It has **seven
 modules**, and one document = exactly one module block:
 
 | Module | Form | Purpose |
@@ -26,6 +26,8 @@ modules**, and one document = exactly one module block:
 | `reply` | `reply "<kind>" { ... }` | Structured ADI answer (content + metadata). |
 | `task` | `task "<name>" { ... }` | Agent work order (CrewAI). |
 | `event` | `event "<name>" { ... }` | Fact / occurrence record. |
+| `memory` | `memory "<name>" { ... }` | Long-term fact / context exchange between agents (v1.5.0). |
+| `plan` | `plan "<name>" { ... }` | DAG execution steps (sequential/parallel) for CrewAI orchestrator (v1.5.0). |
 | `world` | `world "<name>" { ... }` | 3D virtual world rendered by WebGL2 via a Rust→WASM runtime. |
 
 The `world` module declares a `camera`, `lights`, and `entities`; each entity has a
@@ -286,7 +288,7 @@ are positional, not keyword-led)
 
 **MeshParams keys**: `radius tube inner segments size count`
 
-**Module headers**: `world intent reply task event`
+**Module headers**: `world intent reply task event memory plan`
 
 **Protocol keys**: `mode payload verb content recs assign input expect source key session at`
 

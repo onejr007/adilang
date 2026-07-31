@@ -17,10 +17,12 @@ ADILang punya **satu modul per dokumen**:
 | `reply` | `reply "<kind>" { ... }` | Jawaban terstruktur ADI (konten + metadata). | Backend ADI |
 | `task` | `task "<name>" { ... }` | Perintah kerja agent (CrewAI). | CrewAI |
 | `event` | `event "<name>" { ... }` | Catatan kejadian/fakta sistem. | Backend ADI |
+| `memory` | `memory "<name>" { ... }` | Pertukaran fakta/konteks jangka panjang antar-agen (v1.5.0). | Backend ADI |
+| `plan` | `plan "<name>" { ... }` | DAG langkah eksekusi sekuensial/paralel untuk CrewAI (v1.5.0). | CrewAI |
 | `world` | `world "<name>" { ... }` | Dunia 3D interaktif (hologram). | Rust → WASM → WebGL2 |
 
 > **Pencipta & Developer**: ADI (Agent Distributed Intelligence)
-> **Status**: v1.3.0 — STABLE
+> **Status**: v1.7.0 — STABLE
 > **Repo**: https://github.com/onejr007/adilang
 
 ---
