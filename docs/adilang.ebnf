@@ -1,10 +1,14 @@
 # ============================================================================
 # ADILang Formal Grammar — EBNF (W3C-style)
-# Version: 1.0  |  Status: STABLE
-# Author: ADI (AI Agent Ecosystem) — designed by AI, for AI.
+# Version: 1.1  |  Status: STABLE
+# Author: ADI (Agent Distributed Intelligence) — designed by AI, for AI.
 #
 # This file is the normative, machine-parseable grammar of ADILang.
 # It is the single source of truth for any parser/generator (human or AI).
+# ADILang is a protocol / IR language with ONE top-level module per document:
+#   world — 3D scene, implemented by the Rust/WASM world runtime
+#   intent | reply | task | event — protocol modules, implemented by the
+#   ADI backend (core/adilang_protocol.py) and by consuming AIs.
 # Notation follows W3C EBNF:
 #   ::=     definition
 #   "..."   literal terminal
@@ -19,9 +23,11 @@
 # ============================================================================
 
 # ---------------------------------------------------------------------------
-# 1. Document (top level)
+# 1. Document (top level) — exactly one module per source document
 # ---------------------------------------------------------------------------
-document        ::= world
+document        ::= world | intent | reply | task | event
+
+# ─── Module: world (3D scene; Rust → WASM → WebGL2) ─────────────────────────
 world           ::= "world" String "{" top_statement* "}"
 
 top_statement   ::= camera_def
@@ -128,6 +134,52 @@ Comment         ::= "#" [^\n]*                # line comment
 # Keywords are context-sensitive Identifiers (not reserved globally):
 #   world camera light entity let func on mesh material solid wire glow
 #   points sphere box torus icosa ring plane grid frame speak silent click
+#   intent reply task event mode payload verb content recs assign input
+#   expect source key session at
 #   if else return true false
 # Built-in identifiers (available in expressions):
 #   t mouseX mouseY PI
+
+# ---------------------------------------------------------------------------
+# 8. Module: intent — normalized user request
+#    Every incoming chat/command is translated into exactly one intent block.
+# ---------------------------------------------------------------------------
+intent          ::= "intent" String "{" intent_prop* "}"
+intent_prop     ::= "mode" String
+                  | "payload" String
+                  | "verb" String
+verb            ::= "ask" | "inform" | "command" | "greet" | "system"
+
+# ---------------------------------------------------------------------------
+# 9. Module: reply — structured answer
+# ---------------------------------------------------------------------------
+reply           ::= "reply" String "{" reply_prop* "}"
+reply_prop      ::= "mode" String
+                  | "content" String
+                  | "recs" "[" String* "]"
+                  | "world" String
+
+# ---------------------------------------------------------------------------
+# 10. Module: task — agent work order (CrewAI)
+# ---------------------------------------------------------------------------
+task            ::= "task" String "{" task_prop* "}"
+task_prop       ::= "assign" String
+                  | "input" String
+                  | "expect" String
+
+# ---------------------------------------------------------------------------
+# 11. Module: event — fact / occurrence record
+# ---------------------------------------------------------------------------
+event           ::= "event" String "{" event_prop* "}"
+event_prop      ::= "source" String
+                  | "key" String
+                  | "session" String
+                  | "at" String
+
+# Protocol rules (shared):
+#   - Tag string is the single required positional argument (first token).
+#   - Keys may appear in any order; duplicate keys are non-conforming.
+#   - Unknown keys are non-conforming.
+#   - Protocol modules contain only String values (and String[] for recs).
+#   - `world`, `intent`, `reply`, `task`, `event` remain context-sensitive
+#     Identifiers (not globally reserved).

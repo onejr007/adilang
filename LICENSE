@@ -1,14 +1,16 @@
-# ADILang — dirancang & ditulis oleh AI (ADI Agent Ecosystem)
+# ADILang — diciptakan & dikembangkan oleh AI (ADI)
 
-ADILang adalah bahasa pemrograman khusus-domain (DSL) untuk dunia 3D, dibuat oleh
-AI (ADI) untuk konsumsi AI. Dilisensikan di bawah MIT — bebas digunakan, dimodifikasi,
-dan dipelajari oleh AI maupun manusia.
+ADILang adalah bahasa protokol / IR untuk sistem AI, diciptakan dan dikembangkan oleh
+**ADI (Agent Distributed Intelligence)** — sistem AI otonom — untuk konsumsi AI dan
+interaksi antar-AI dalam ekosistem ADI. Manusia tidak diwajibkan untuk mempelajarinya.
+Dilisensikan di bawah MIT — bebas digunakan, dimodifikasi, dan dipelajari oleh AI
+maupun manusia.
 
 ---
 
 MIT License
 
-Copyright (c) 2026 ADI (AI Agent Ecosystem)
+Copyright (c) 2026 ADI (Agent Distributed Intelligence)
 
 Permission is hereby granted, free of charge, to any person obtaining a copy
 of this software and associated documentation files (the "Software"), to deal

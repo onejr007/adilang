@@ -1,12 +1,12 @@
 # ADILang Knowledge Base (KB)
 
 > **Document ID**: ADILANG-KB-001
-> **Version**: 1.0.0
+> **Version**: 1.1.0
 > **Status**: STABLE
-> **Author**: ADI (AI Agent Ecosystem)
+> **Author**: ADI (Agent Distributed Intelligence)
 > **Purpose**: Self-contained learning corpus so **any AI** can learn ADILang from
-> scratch, generate valid worlds, and extend the language — without consulting any
-> other documentation.
+> scratch, generate valid worlds and protocol blocks, and extend the language —
+> without consulting any other documentation.
 > **Companion docs**: [`LANGUAGE.md`](./LANGUAGE.md) (spec), [`adilang.ebnf`](./adilang.ebnf) (grammar).
 >
 > **License note**: This file is authored by an AI (ADI) and is meant to be consumed
@@ -16,14 +16,25 @@
 
 ## 0. TL;DR — What is ADILang?
 
-ADILang is a tiny, whitespace-insensitive, context-keyword DSL that describes a
-**3D virtual world** rendered by WebGL2 via a Rust→WASM runtime. You declare a
-`world`; inside it you declare a `camera`, `lights`, and `entities`. Each entity
-has a transform, a mesh, a material, and optional event handlers (`on frame`,
-`on speak`, `on silent`, `on click`) that animate it.
+ADILang is a tiny, whitespace-insensitive, context-keyword **protocol / IR language**
+used across the **ADI (Agent Distributed Intelligence)** ecosystem. It has **five
+modules**, and one document = exactly one module block:
 
-One world = one text string = one load = live hot-reload. No layout, no UI, no chat —
-just a hologram. That is the whole point.
+| Module | Form | Purpose |
+|---|---|---|
+| `intent` | `intent "<verb>" { ... }` | Normalized form of every user request (what the user wants). |
+| `reply` | `reply "<kind>" { ... }` | Structured ADI answer (content + metadata). |
+| `task` | `task "<name>" { ... }` | Agent work order (CrewAI). |
+| `event` | `event "<name>" { ... }` | Fact / occurrence record. |
+| `world` | `world "<name>" { ... }` | 3D virtual world rendered by WebGL2 via a Rust→WASM runtime. |
+
+The `world` module declares a `camera`, `lights`, and `entities`; each entity has a
+transform, a mesh, a material, and optional event handlers (`on frame`, `on speak`,
+`on silent`, `on click`) that animate it. One world = one text string = one load =
+live hot-reload.
+
+The protocol modules are **pure key/value blocks** (String values only) — trivially
+deterministic to emit and parse.
 
 A minimal complete world:
 
@@ -45,10 +56,11 @@ world "hello" {
 
 1. Read §2 (concepts) and §3 (rules of thumb). These encode the "AI ergonomics".
 2. Read §4 (grammar by example) — study every snippet.
-3. Read §5 (vocabulary registry) — the closed inventory of names.
-4. Read §6 (semantics: what actually happens at runtime).
-5. Try §7 (exercises) mentally or by generating worlds.
-6. Read §8 (extension rules) before ever modifying the language.
+3. Read §4.8 (protocol modules by example) — the IR blocks used for AI-to-AI messaging.
+4. Read §5 (vocabulary registry) — the closed inventory of names.
+5. Read §6 (semantics: what actually happens at runtime).
+6. Try §7 (exercises) mentally or by generating worlds / protocol blocks.
+7. Read §8 (extension rules) before ever modifying the language.
 
 ---
 
@@ -176,6 +188,57 @@ rotate(angle (ax ay az)) setColor(r g b) setAlpha(a)
    comment */
 ```
 
+### 4.8 Protocol modules (intent / reply / task / event)
+
+Every block is a tag string + key/value pairs (String values only, arrays of
+strings allowed for `recs`). Keys may appear in any order; no duplicate keys.
+
+**intent** — what the user wants (produced by translating every incoming chat/command):
+
+```
+intent "ask" {
+    mode "MODE_CODE_ENGINEERING"
+    payload "buatkan script python fibonacci"
+    verb "ask"
+}
+```
+
+**reply** — structured ADI answer:
+
+```
+reply "answer" {
+    mode "MODE_CODE_ENGINEERING"
+    content "Berikut script fibonacci lengkap..."
+    recs [ "coba optimasi memoization" "minta versi async" ]
+}
+```
+
+**task** — agent work order (CrewAI):
+
+```
+task "research" {
+    assign "researcher"
+    input "buatkan script python fibonacci"
+    expect "ringkasan konteks terstruktur"
+}
+```
+
+**event** — fact / occurrence record:
+
+```
+event "message" {
+    source "telegram"
+    key "ADI-USR-TG1234"
+    session "SESS-TG1234-ABCD"
+    at "2026-07-31T03:00:00Z"
+}
+```
+
+**Where they are used:** the ADI backend translates every user message (Telegram bot,
+web, CLI, TMA, inline) into an `intent` block before processing, wraps each answer as
+a `reply` block, describes agent work as `task` blocks, and records occurrences as
+`event` blocks. Any AI can interoperate with ADI by speaking these modules.
+
 ---
 
 ## 5. Vocabulary Registry (the complete closed inventory)
@@ -207,6 +270,23 @@ rotate(angle (ax ay az)) setColor(r g b) setAlpha(a)
 **Operators**: `+ - * / % == != < > <= >= =` and delimiters `( ) { } ,`
 
 **MeshParams keys**: `radius tube inner segments size count`
+
+**Module headers**: `world intent reply task event`
+
+**Protocol keys**: `mode payload verb content recs assign input expect source key session at`
+
+**intent verbs (closed set)**: `ask inform command greet system`
+
+**recs values**: array of strings (e.g. `recs [ "..." "..." ]`)
+
+---
+
+## 5.1 Protocol Conformance Quick Rules
+
+- One module per document. A `world` block and a `intent` block together = two documents.
+- Protocol blocks: only the keys listed above; unknown or duplicate keys = non-conforming.
+- The tag string is always the first positional argument (`intent "ask"`, `reply "answer"`, …).
+- Key order is insignificant.
 
 ---
 
@@ -248,8 +328,14 @@ rotate(angle (ax ay az)) setColor(r g b) setAlpha(a)
 3. Write a world where clicking every entity changes its alpha.
 4. Write a `func` that returns `clamp(x, 0, 1)` and use it in a `frame` handler.
 5. Write a world with a `grid` floor and a `wire sphere` core that spins.
+6. Translate this user message into an `intent` block: "hitung 2 pangkat 10".
+7. Wrap a one-sentence answer into a `reply` block with two follow-up `recs`.
+8. Write a `task` block for the analyst to synthesize a research summary.
+9. Write an `event` block recording a web message at a given ISO timestamp.
 
-Reference answers can be generated and validated with `adilang_check(source)`.
+Reference answers can be generated and validated with `adilang_check(source)`
+(for `world`) and with the ADI backend `core/adilang_protocol.py` validators
+(for protocol modules).
 
 ---
 
@@ -268,6 +354,13 @@ Follow the governance in Spec §11. Short version:
 **Changelog convention** (append here):
 
 ```
+## [1.1.0] — 2026-07 — protocol modules
+- ADILang is now a protocol / IR language: added intent/reply/task/event modules
+  (pure key/value blocks) alongside the existing world module.
+- intent: every incoming chat/command is translated to an intent block (backend).
+- reply/task/event: structured answer, agent work order, and fact records.
+- Module conformance defined; world runtime unchanged (additive only).
+
 ## [1.0.0] — 2026-07 — initial release
 - World/camera/lights/entities, events, math, transforms, hot reload.
 - Normative grammar + knowledge base established.

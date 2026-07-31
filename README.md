@@ -1,15 +1,26 @@
 # ADILang
 
-**Bahasa pemrograman 3D yang dirancang AI, untuk AI.**
+**Bahasa protokol / IR yang dirancang AI (ADI), untuk AI.**
 
-ADILang adalah domain-specific language (DSL) untuk membangun **3D virtual world /
-hologram** yang dirender via **WebGL2**, dijalankan sebagai **WASM (Rust)**. Bahasa ini
-dibuat agar sebuah model AI dapat **membaca, menghasilkan, memverifikasi, dan
-memperluas** dunia 3D dengan deterministik, rendah ambiguitas, dan hemat token —
-tanpa ergonomi manusia.
+ADILang adalah bahasa utama (protocol / intermediate-representation) di ekosistem
+**ADI (Agent Distributed Intelligence)** — diciptakan dan dikembangkan oleh ADI
+sendiri, untuk dipakai antar-AI dan oleh backend ADI. Manusia tidak perlu
+mempelajarinya: ADILang dibuat khusus agar AI dapat **membaca, menghasilkan,
+memverifikasi, dan memperluasnya** secara deterministik, rendah ambiguitas, dan
+hemat token.
 
-> **Pencipta**: ADI (AI Agent Ecosystem)
-> **Status**: v1.0.0 — STABLE
+ADILang punya **satu modul per dokumen**:
+
+| Modul | Bentuk | Fungsi | Runtime |
+|---|---|---|---|
+| `intent` | `intent "<verb>" { ... }` | Representasi ter-normalisasi dari setiap permintaan/chat user. | Backend ADI (Python) |
+| `reply` | `reply "<kind>" { ... }` | Jawaban terstruktur ADI (konten + metadata). | Backend ADI |
+| `task` | `task "<name>" { ... }` | Perintah kerja agent (CrewAI). | CrewAI |
+| `event` | `event "<name>" { ... }` | Catatan kejadian/fakta sistem. | Backend ADI |
+| `world` | `world "<name>" { ... }` | Dunia 3D interaktif (hologram). | Rust → WASM → WebGL2 |
+
+> **Pencipta & Developer**: ADI (Agent Distributed Intelligence)
+> **Status**: v1.1.0 — STABLE
 > **Repo**: https://github.com/onejr007/adilang
 
 ---
@@ -18,11 +29,23 @@ tanpa ergonomi manusia.
 
 | File | Isi |
 |---|---|
-| [`docs/LANGUAGE.md`](docs/LANGUAGE.md) | Spesifikasi bahasa: semantik, registry builtin, model eksekusi, protokol ekstensi. |
+| [`docs/LANGUAGE.md`](docs/LANGUAGE.md) | Spesifikasi bahasa: semantik, modul protocol/IR, registry builtin, model eksekusi, protokol ekstensi. |
 | [`docs/adilang.ebnf`](docs/adilang.ebnf) | Grammar formal W3C-EBNF (machine-parseable). |
 | [`docs/ADILANG_KNOWLEDGE.md`](docs/ADILANG_KNOWLEDGE.md) | Knowledge base = dataset untuk AI lain belajar ADILang. |
 
 ## Contoh minimal
+
+Modul `intent` (setiap chat user diterjemahkan menjadi blok ini):
+
+```
+intent "ask" {
+    mode "MODE_CODE_ENGINEERING"
+    payload "buatkan script python fibonacci"
+    verb "ask"
+}
+```
+
+Modul `world` (dunia 3D / hologram):
 
 ```
 world "hello" {
@@ -66,7 +89,7 @@ wasm-pack build --target web      # → pkg/ (WASM + JS loader)
 
 Syarat toolchain: Rust stable + target `wasm32-unknown-unknown` + `wasm-pack`.
 
-## API WASM (host)
+## API WASM (host) — modul world
 
 | Export | Signature | Purpose |
 |---|---|---|
@@ -76,6 +99,20 @@ Syarat toolchain: Rust stable + target `wasm32-unknown-unknown` + `wasm-pack`.
 | `adilang_speak()` / `adilang_silent()` | `Result<(), String>` | trigger event |
 | `adilang_debug_count()` | `usize` | jumlah entity |
 | `adilang_version()` | `String` | versi bahasa |
+
+## ADILang sebagai Protocol / IR di ekosistem ADI
+
+- **Semua input user diterjemahkan ke ADILang.** Setiap chat/perintah dari Telegram
+  bot, web, CLI, maupun TMA diproses menjadi satu blok `intent` sebelum diolah lebih
+  lanjut — sehingga seluruh pipeline bekerja di atas representasi yang seragam,
+  terstruktur, dan deterministik.
+- **Hemat token.** Sintaksnya ringkas, tanpa karakter bermakna dari whitespace, dan
+  nilai protocol berupa `String`/`String[]` sederhana. LLM tidak perlu mempelajari
+  aturan baru untuk memancarkan blok IR.
+- **Sistematis & terstruktur.** Semua blok diverifikasi terhadap daftar kunci tertutup;
+  kunci duplikat/tidak dikenal ditolak (validasi deterministik).
+- **Bisa dipelajari semua LLM.** `docs/ADILANG_KNOWLEDGE.md` adalah corpus belajar
+  mandiri — model apa pun bisa memahami ADILang dari nol.
 
 ## Ekstensibilitas
 

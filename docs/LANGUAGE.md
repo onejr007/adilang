@@ -1,11 +1,12 @@
-# ADILang Language Specification v1.0
+# ADILang Language Specification v1.1
 
 > **Document ID**: ADILANG-SPEC-001
 > **Status**: STABLE
-> **Version**: 1.0.0
-> **Author**: ADI (AI Agent Ecosystem)
-> **Authorship**: Designed, specified, and implemented entirely by AI.
-> **Audience**: AI systems (primary), and the ADI runtime (Rust → WASM → WebGL2).
+> **Version**: 1.1.0
+> **Author**: ADI (Agent Distributed Intelligence)
+> **Authorship**: Designed, specified, and implemented entirely by AI (ADI).
+> **Audience**: AI systems (primary), the ADI backend (intent/reply/task/event
+> modules), and the ADI world runtime (Rust → WASM → WebGL2).
 > **Normative grammar**: see [`adilang.ebnf`](./adilang.ebnf).
 > **Knowledge base (learning dataset)**: see [`ADILANG_KNOWLEDGE.md`](./ADILANG_KNOWLEDGE.md).
 
@@ -13,12 +14,29 @@
 
 ## Preamble (read first)
 
-ADILang is a **domain-specific language (DSL)** created by AI, for AI, to describe
-an interactive **3D virtual world / hologram**. It is not designed for human
-ergonomics; it is designed to be **deterministic, unambiguous, low-ambiguity, and
-cheap for an LLM to emit and parse**. Any AI — including ADI itself or a third-party
-model — can read this document, generate valid ADILang, extend the language, or
-retarget it to another renderer.
+ADILang is a **protocol / intermediate-representation (IR) language** created by AI
+for AI. It is the canonical language of the **ADI (Agent Distributed Intelligence)**
+ecosystem: the single structured format used to represent **what a user wants**
+(`intent`), **what ADI answers** (`reply`), **what work agents must do** (`task`),
+**what happened in the system** (`event`), and — as one optional module — **a 3D
+virtual world / hologram** (`world`, rendered by Rust → WASM → WebGL2).
+
+It is not designed for human ergonomics. Humans are **not** expected to read or write
+ADILang: it is a machine-to-machine language, optimized to be **deterministic,
+unambiguous, low-ambiguity, and cheap for an LLM to emit and parse**. Any AI —
+including ADI itself or a third-party model — can read this document, generate valid
+ADILang, extend the language, or retarget a module to another runtime.
+
+**Module model.** ADILang is split into *modules*. Each module is a self-contained
+top-level document type with its own grammar rules and its own processing runtime:
+
+| Module | Top-level form | Purpose | Primary runtime |
+|---|---|---|---|
+| `intent` | `intent "<verb>" { ... }` | Normalized representation of a user request (translation target for every incoming chat/command). | ADI backend (Python), any AI |
+| `reply` | `reply "<kind>" { ... }` | Structured representation of ADI's answer (content + metadata). | ADI backend, any AI |
+| `task` | `task "<name>" { ... }` | Work order for an agent (assignee, input, expected output). | CrewAI agents |
+| `event` | `event "<name>" { ... }` | Fact/occurrence record (source, key, session, timestamp). | ADI backend |
+| `world` | `world "<name>" { ... }` | Interactive 3D scene (entities, camera, lights, handlers). | Rust → WASM → WebGL2 |
 
 Because ADI is both the author and the primary consumer, **extensibility is a first
 class requirement**. Section 11 defines the extension protocol that ADI must follow
@@ -36,37 +54,49 @@ Three normative artifacts define ADILang:
 ## 1. Design Principles
 
 Every rule below is a consequence of one goal: **an AI model must be able to read,
-generate, and verify ADILang with minimal token cost and minimal ambiguity.**
+generate, and verify ADILang with minimal token cost and minimal ambiguity.** These
+principles apply to *every* module (protocol modules included).
 
 1. **P1 — Determinism.** No whitespace-sensitive blocks, no significant indentation,
-   no semicolon insertion, no macros. Layout carries no meaning.
+   no semicolon insertion, no macros. Layout carries no meaning. The same source
+   string always yields the same AST and the same runtime behavior.
 2. **P2 — Sparse syntax.** Fewer tokens = fewer hallucinations. Six delimiters total:
-   `( ) { } , =`. Operators are conventional math symbols.
+   `( ) { } , =`. Operators are conventional math symbols. Protocol modules use only
+   `Ident String` pairs, so a model can emit them without learning new grammar.
 3. **P3 — Positional simplicity.** Arguments are separated by whitespace or optional
    commas. This removes `f(a, b, c)` vs `f(a b c)` ambiguity — both are valid and equal.
 4. **P4 — Contextual keywords.** No reserved words at the lexical level. `world`,
-   `sphere`, `on`, `frame`, etc. are identifiers that gain meaning from position.
-   An AI never triggers a "reserved word" error by choosing a bad variable name.
+   `sphere`, `on`, `frame`, `intent`, `mode`, etc. are identifiers that gain meaning
+   from position. An AI never triggers a "reserved word" error by choosing a bad
+   variable name.
 5. **P5 — Declarative core, small imperative shell.** The world *is* data
    (entities, meshes, materials, lights, camera). Imperative code is confined to
-   `func` and event handlers.
+   `func` and event handlers. Protocol modules are pure declarative key/value blocks.
 6. **P6 — Self-describing.** The full vocabulary (mesh builders, material builders,
-   functions, properties) is a closed registry (Section 8–10) that the runtime can
-   enumerate. An AI can query `adilang_version()` and, in future, a registry API.
+   functions, properties, protocol keys) is a closed registry (Section 8–10) that the
+   runtime can enumerate. An AI can query `adilang_version()` and, in future, a
+   registry API.
 7. **P7 — Hot-reloadable.** The entire world is a string of text. The runtime exposes
    `adilang_load(source)` so any AI can regenerate the world live without deployment.
 8. **P8 — Stateless-by-default.** Evaluators keep world state in the scene model;
-   ADILang scripts themselves are pure descriptions plus per-frame deltas.
+   ADILang scripts themselves are pure descriptions plus per-frame deltas. Protocol
+   blocks are pure data — they carry no execution state.
 
 ---
 
 ## 2. Notation & Conformance
 
 - **Must / Should / May** carry RFC 2119 meanings.
-- A document **conforms** to ADILang v1.0 if it is parseable by the normative grammar
+- A document **conforms** to ADILang v1.1 if it is parseable by the normative grammar
   and satisfies every **Must** in this specification.
-- The reference implementation is the Rust crate at the repository root (`src/*.rs`:
-  lexer, parser, evaluator, engine). It is the tie-breaker for spec ambiguity until v1.x.
+- **Module conformance.** A *module block* conforms if it is parseable by its module
+  grammar rule (Section 4.5). A module is *implemented* when a runtime can parse,
+  validate, and act on it. The reference **world runtime** is the Rust crate at the
+  repository root (`src/*.rs`: lexer, parser, evaluator, engine) and implements the
+  `world` module. The **protocol modules** (`intent`, `reply`, `task`, `event`) are
+  implemented by the ADI backend (see `core/adilang_protocol.py` in the ADI monorepo)
+  and by any AI that consumes them.
+- The reference implementation is the tie-breaker for spec ambiguity until v1.x.
 
 ---
 
@@ -112,7 +142,13 @@ setPos(1 2 3)     # valid, identical
 ## 4. Grammar
 
 The normative grammar is **W3C-style EBNF** in [`adilang.ebnf`](./adilang.ebnf).
-Key shape, for quick AI reference:
+A source document is exactly **one top-level module block**:
+
+```
+document    ::= world | intent | reply | task | event
+```
+
+Key shape for the `world` module, for quick AI reference:
 
 ```
 world ::= "world" String "{" top_statement* "}"
@@ -142,11 +178,36 @@ mesh torus 1.5 0.02          # positional r, tube
 material solid (0.1 0.8 1) 0.9
 ```
 
+### 4.5 Protocol modules (intent / reply / task / event)
+
+Protocol modules are **pure key/value blocks**. Every key is an identifier, every
+value is a string (or an array of strings). No expressions, no precedence rules.
+This makes them trivially deterministic to emit and parse.
+
+```
+intent ::= "intent" String "{" intent_prop* "}"
+intent_prop ::= "mode" String | "payload" String | "verb" String
+
+reply ::= "reply" String "{" reply_prop* "}"
+reply_prop ::= "mode" String | "content" String | "recs" "[" String* "]" | "world" String
+
+task ::= "task" String "{" task_prop* "}"
+task_prop ::= "assign" String | "input" String | "expect" String
+
+event ::= "event" String "{" event_prop* "}"
+event_prop ::= "source" String | "key" String | "session" String | "at" String
+```
+
+The leading string is a **tag** (the verb/kind/name/id of the block) and is the
+single required positional argument. Keys **May** appear in any order; a duplicate
+key **Must** be rejected as non-conforming (deterministic validation). See Section 15
+for the full semantics of each protocol module.
+
 ---
 
 ## 5. Semantic Model
 
-A program evaluates to a **World** with:
+A `world` module evaluates to a **World** with:
 
 - one **Camera** (default if unspecified),
 - zero or more **Lights** (a default key light exists),
@@ -209,8 +270,8 @@ The evaluator's value domain is closed:
 | `Tuple` | `(x y z)` | positional vector; all elements numeric |
 | `Null` | — | returned by `return`-less funcs, void calls |
 
-**No string concatenation. No arrays/structs. No object literals.** (v1.0 scope;
-see Extension Protocol.)
+**No string concatenation. No arrays/structs in expressions. No object literals.**
+(World-module scope; protocol modules add `String[]` arrays. See Extension Protocol.)
 
 ### 6.1 Built-in identifiers
 | Ident | Meaning |
@@ -366,20 +427,127 @@ Exposed via wasm-bindgen (`src/wasm_api.rs`):
 
 ---
 
-## 13. Limitations (v1.0)
+## 13. Limitations (v1.1)
 
 - f64 numbers only; no string concat in expressions.
-- No arrays/structs/objects; state via `let` globals + entity transforms.
+- No arrays/structs/objects in the `world` module; state via `let` globals + entity
+  transforms. Protocol modules allow only `String` values and `String[]` arrays.
 - No iteration/while loops (only bounded, deterministic `func` recursion if any).
 - Tuples are homogeneous numeric vectors (position/color), not general values.
 - Single world per load; no multi-world scene graphs yet.
 - `points` builder is recognized by the parser but currently renders as `solid`.
+- Protocol modules are processed by the ADI backend and by consuming AIs; the Rust
+  WASM runtime implements the `world` module only (unknown top-level modules are
+  rejected by the world parser — they are not its concern).
 
 ---
 
 ## 14. References
 
 - Normative grammar: `docs/adilang.ebnf`
-- Implementation: `src/*.rs`
+- Implementation (world module): `src/*.rs`
 - Example world: `worlds/default.adi`
 - Learning dataset: `docs/ADILANG_KNOWLEDGE.md`
+
+---
+
+## 15. Protocol Modules — Semantics
+
+This section defines the meaning of `intent`, `reply`, `task`, and `event`. It is
+the contract used by the ADI backend (`core/adilang_protocol.py`) and by any AI that
+wants to interoperate with ADI using ADILang as IR.
+
+### 15.1 `intent` — normalized user request
+
+Every incoming chat / command (Telegram bot, web, CLI, TMA, inline) is translated
+into exactly one `intent` block before further processing. This is the **single
+source of truth** for what the user wants.
+
+| Key | Value (String) | Semantics |
+|---|---|---|
+| `mode` | intent-mode id | The ADI intent-mode (`MODE_CONVERSATION`, `MODE_CODE_ENGINEERING`, `MODE_CALCULATION`, …). |
+| `payload` | compact source text | The normalized, PII-anonymized, whitespace-collapsed user text. |
+| `verb` | `ask` / `inform` / `command` / `greet` / `system` | Coarse action class. |
+
+```
+intent "ask" {
+    mode "MODE_CODE_ENGINEERING"
+    payload "buatkan script python fibonacci"
+    verb "ask"
+}
+```
+
+**Must**: `mode` and `payload` are present; `verb` is one of the closed set.
+**Determinism**: the same raw text + detected mode must always encode to the same
+`intent` block.
+
+### 15.2 `reply` — structured answer
+
+ADI's answer, wrapped for machine consumption (persistence, learning, AI-to-AI
+forwarding). The human-facing rendering is derived from `content`.
+
+| Key | Value | Semantics |
+|---|---|---|
+| `mode` | intent-mode id | Mode the reply was produced under. |
+| `content` | String | The full human-facing answer text. |
+| `recs` | `String[]` | Follow-up recommendations (2–3). |
+| `world` | String (optional) | Optional `world` module source to hot-load (3D). |
+
+```
+reply "answer" {
+    mode "MODE_CODE_ENGINEERING"
+    content "Berikut script fibonacci..."
+    recs [ "optimasi dengan memoization" "versi async" ]
+}
+```
+
+**Must**: `content` present; `recs` array of strings (may be empty).
+**Must not**: `content` ever be empty.
+
+### 15.3 `task` — agent work order
+
+A unit of work for an agent. Used by the CrewAI layer: research and synthesis tasks
+are described as `task` blocks so any AI can audit what work was ordered.
+
+| Key | Value | Semantics |
+|---|---|---|
+| `assign` | agent role id | Who must do the work (`researcher`, `analyst`, …). |
+| `input` | String | The query / context the task operates on. |
+| `expect` | String | The required deliverable shape. |
+
+```
+task "research" {
+    assign "researcher"
+    input "buatkan script python fibonacci"
+    expect "ringkasan konteks terstruktur"
+}
+```
+
+### 15.4 `event` — fact / occurrence record
+
+An immutable record of something that happened (message received, job completed,
+error, memory write). Useful for AI-to-AI audit and telemetry.
+
+| Key | Value | Semantics |
+|---|---|---|
+| `source` | String | Channel / origin (`telegram`, `web`, `cli`, `tma`, `worker`, `system`). |
+| `key` | String | User key involved (optional). |
+| `session` | String | Session id involved (optional). |
+| `at` | String | ISO-8601 UTC timestamp. |
+
+```
+event "message" {
+    source "telegram"
+    key "ADI-USR-TG1234"
+    session "SESS-TG1234-ABCD"
+    at "2026-07-31T03:00:00Z"
+}
+```
+
+### 15.5 Conformance for protocol modules
+
+- Each module block must contain only the keys in its table (unknown key = non-conforming).
+- Duplicate keys = non-conforming.
+- Order of keys is insignificant (but the tag string is always first).
+- A document containing a `world` block and a protocol block together is **two**
+  documents, not one. Processors read one module per source string.
