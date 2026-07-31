@@ -1,6 +1,6 @@
 # ============================================================================
 # ADILang Formal Grammar — EBNF (W3C-style)
-# Version: 1.2  |  Status: STABLE
+# Version: 1.4.0  |  Status: STABLE
 # Author: ADI (Agent Distributed Intelligence) — designed by AI, for AI.
 #
 # This file is the normative, machine-parseable grammar of ADILang.
@@ -185,3 +185,17 @@ event_prop      ::= "source" String
 #   - Protocol modules contain only String values (and String[] for recs).
 #   - `world`, `intent`, `reply`, `task`, `event` remain context-sensitive
 #     Identifiers (not globally reserved).
+#
+# ---------------------------------------------------------------------------
+# 12. Binary transport note (v1.4.0 — NOT grammar, for documentation)
+# ---------------------------------------------------------------------------
+# ADILang text (grammar above) is compiled by the Rust world runtime into a
+# bit-packed BINARY format for real-time multiplayer transport (WebSocket
+# antar-client). It is NOT part of the grammar — it is an encoding of scene
+# state. Spec: LANGUAGE.md §12.2; implementation: src/bytecode.rs.
+#   - Header 4B: magic 0xAD | version 0x01 | flags (bit0=DELTA) | count(u8).
+#   - FULL snapshot: 21B/entity (mesh3b|mat2b bit-packed, id u8, pos i16x3,
+#     rot i16x3, scale u8x3, color u8x4) — kuantisasi deterministik.
+#   - DELTA: mask-based (bit0 pos, bit1 rot, bit2 scale, bit3 color,
+#     bit4 mesh/material) — hanya field yang berubah; struktur berubah = FULL.
+#   - Registry kategori `binary` meng-enumerasi API bytecode (P6).

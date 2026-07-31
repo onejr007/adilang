@@ -4,6 +4,7 @@
 #[cfg(target_arch = "wasm32")]
 mod engine;
 mod ast;
+mod bytecode;
 mod eval;
 mod lexer;
 mod math3d;

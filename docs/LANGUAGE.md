@@ -1,8 +1,8 @@
-# ADILang Language Specification v1.3
+# ADILang Language Specification v1.4
 
 > **Document ID**: ADILANG-SPEC-001
 > **Status**: STABLE
-> **Version**: 1.3.0
+> **Version**: 1.4.0
 > **Author**: ADI (Agent Distributed Intelligence)
 > **Authorship**: Designed, specified, and implemented entirely by AI (ADI).
 > **Audience**: AI systems (primary), the ADI backend (intent/reply/task/event
@@ -445,6 +445,10 @@ Exposed via wasm-bindgen (`src/wasm_api.rs`):
 | `adilang_debug_count()` | `usize` | entity count (diagnostics) |
 | `adilang_version()` | `String` | version string |
 | `adilang_registry()` | `String` | closed-vocabulary enumeration (P6) |
+| `adilang_binary_encode_full()` | `Result<Vec<u8>, String>` | encode current world → FULL snapshot bytecode (v1.4) |
+| `adilang_binary_encode_delta(prev_full)` | `Result<Vec<u8>, String>` | encode per-frame changes vs baseline → DELTA packet |
+| `adilang_binary_decode_full(bytes)` | `Result<String, String>` | decode FULL bytecode → text (debug/verify) |
+| `adilang_binary_spec()` | `String` | binary format spec text (P6 self-describing) |
 
 ---
 
@@ -461,12 +465,61 @@ Exposed via wasm-bindgen (`src/wasm_api.rs`):
 
 ---
 
+## 12.2 ADILang Binary / Bytecode transport (v1.4.0)
+
+ADILang text is compact and AI-readable. For real-time multiplayer
+communication (thousands of packets/sec over WebSocket between clients), the
+Rust runtime compiles the scene state into a **bit-packed binary / bytecode**
+format (`src/bytecode.rs`, exported to WASM as `adilang_binary_*`).
+
+### 12.2.1 Packet header (4 bytes)
+
+| Offset | Value | Meaning |
+|---|---|---|
+| 0 | `0xAD` | magic ("ADI") |
+| 1 | `0x01` | binary format version (independent of language version) |
+| 2 | flags | bit0 = 1 → DELTA, 0 → FULL |
+| 3 | `count` | entity count (u8, max 255) |
+
+### 12.2.2 FULL snapshot (sent on join / when structure changes)
+
+Per entity — exactly **21 bytes**:
+
+| Offset | Size | Field | Encoding |
+|---|---|---|---|
+| 0 | 1 | header | `mesh(3b) | material(2b) | reserved(3b)` — bit-packed |
+| 1 | 1 | id | entity index (u8, stable across frames) |
+| 2..8 | 6 | pos | i16 × 3, quantized `×100` (precision 0.01, range ±327.67) |
+| 8..14 | 6 | rot | i16 × 3, quantized `×1000` (precision 0.001 rad) |
+| 14..17 | 3 | scale | u8 × 3, `÷50` (precision 0.02, range 0..5.1) |
+| 17..21 | 4 | color | u8 × 4 rgba (0..255) |
+
+### 12.2.3 DELTA packet (per-frame)
+
+Only changed fields are sent, selected by a per-entity **mask** (bit0 pos,
+bit1 rot, bit2 scale, bit3 color, bit4 mesh/material), followed by the
+changed fields in that fixed order (pos 6B, rot 6B, scale 3B, color 4B,
+mesh/material 1B).
+
+- Changes are compared at **quantized resolution** — a delta below the format
+  precision (e.g. `0.001` position drift) produces an empty 4-byte packet,
+  so sub-resolution jitter never bloats the stream.
+- DELTA is valid only when the entity count equals the baseline. If the
+  structure changed (entity added/removed) the sender MUST emit a new FULL
+  snapshot; `encode_delta` returns `None` in that case.
+- Full determinism (P1): identical state → identical bytecode. Closed
+  vocabulary (P6): the `binary` registry category enumerates the API via
+  `binary_spec()` / `adilang_registry()`.
+
+---
+
 ## 13. Limitations (v1.3)
 
 - f64 numbers only; no string concat in expressions.
 - No arrays/structs/objects in the `world` module; state via `let` globals + entity
   transforms. Protocol modules allow only `String` values and `String[]` arrays.
-- No iteration/while loops (only bounded, deterministic `func` recursion if any).
+- Iteration is strictly bounded: `while`/`for` loops have a deterministic
+  iteration cap and there is no recursion — no unbounded control flow (P1).
 - Tuples are homogeneous numeric vectors (position/color), not general values.
 - Single world per load; no multi-world scene graphs yet.
 - `points` material renders the mesh's vertex cloud (gl.POINTS); solid meshes keep

@@ -12,7 +12,7 @@ use crate::scene::{MaterialKind, MeshKind};
 /// Versi kanonik bahasa ADILang — sumber tunggal kebenaran untuk versi.
 /// Sinkron dengan: Cargo.toml, docs/LANGUAGE.md, docs/adilang.ebnf,
 /// docs/ADILANG_KNOWLEDGE.md, dan core/adilang_protocol.py (backend ADI).
-pub const VERSION: &str = "1.3.0";
+pub const VERSION: &str = "1.4.0";
 
 // ── SUMBER TUNGGAL KEBENARAN untuk builder mesh/material ────────────────────
 // Dipakai oleh: parser.rs `is_builder()`, eval.rs `apply_mesh()/apply_material()`,
@@ -121,6 +121,9 @@ pub fn registry_text() -> String {
             "protocol: intent reply task event world\n",
             "protocolkey: mode payload verb content recs world assign input expect source key session at\n",
             "verb: ask inform command greet system\n",
+            // ADILang Binary/Bytecode (v1.4.0) — API transport real-time
+            // (bit-packing + delta, Rust → WASM → WebSocket antar-client).
+            "binary: encode_full decode_full encode_delta apply_delta packet_kind packet_version packet_entity_count binary_spec\n",
         )
     )
 }
@@ -161,6 +164,15 @@ mod tests {
         for kw in ["ask", "inform", "command", "greet", "system"] {
             assert!(r.contains(kw), "registry harus memuat verb '{kw}'");
         }
+    }
+
+    #[test]
+    fn registry_meliputi_binary_bytecode_api() {
+        let r = registry_text();
+        for kw in ["encode_full", "decode_full", "encode_delta", "apply_delta", "binary_spec"] {
+            assert!(r.contains(kw), "registry harus memuat binary API '{kw}'");
+        }
+        assert!(r.contains("binary:"), "registry harus memuat kategori binary");
     }
 
     #[test]

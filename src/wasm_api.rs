@@ -205,6 +205,59 @@ pub fn adilang_registry() -> String {
     crate::registry::registry_text()
 }
 
+/// Encode snapshot entity world saat ini → bytecode ADILang FULL (v1.4.0).
+/// Untuk transport real-time multiplayer antar-client via WebSocket.
+#[wasm_bindgen]
+pub fn adilang_binary_encode_full() -> Result<Vec<u8>, String> {
+    with_engine(|e| {
+        let entities: Vec<crate::scene::EntityState> = e.interp.world.entities.clone();
+        crate::bytecode::encode_full(&entities)
+    })
+}
+
+/// Encode perubahan frame terakhir → bytecode DELTA (mask-based).
+/// Baseline dikirim sebagai `prev_full` (bytecode FULL yang sudah dimiliki
+/// client). Mengembalikan None (error) bila struktur berubah → kirim FULL.
+#[wasm_bindgen]
+pub fn adilang_binary_encode_delta(prev_full: &[u8]) -> Result<Vec<u8>, String> {
+    let prev = crate::bytecode::decode_full(prev_full)?;
+    with_engine(|e| {
+        let current: Vec<crate::scene::EntityState> = e.interp.world.entities.clone();
+        crate::bytecode::encode_delta(&prev, &current)
+            .ok_or_else(|| "Struktur world berubah — kirim FULL snapshot".to_string())
+    })
+}
+
+/// Decode bytecode FULL → teks deskriptif (debug/verifikasi dari JS).
+#[wasm_bindgen]
+pub fn adilang_binary_decode_full(bytes: &[u8]) -> Result<String, String> {
+    let ents = crate::bytecode::decode_full(bytes)?;
+    let mut lines = Vec::new();
+    for e in &ents {
+        lines.push(format!(
+            "{} mesh={:?} mat={:?} pos=({:.2} {:.2} {:.2})",
+            e.id,
+            e.mesh,
+            e.material,
+            e.transform.pos[0],
+            e.transform.pos[1],
+            e.transform.pos[2]
+        ));
+    }
+    Ok(format!(
+        "ADILangBinary FULL v{} — {} entity\n{}",
+        crate::bytecode::packet_version(bytes),
+        ents.len(),
+        lines.join("\n")
+    ))
+}
+
+/// Spesifikasi format bytecode ADILang (untuk registry/docs/AI).
+#[wasm_bindgen]
+pub fn adilang_binary_spec() -> String {
+    crate::bytecode::binary_spec()
+}
+
 fn timestamp_seconds() -> f64 {
     use js_sys::Date;
     Date::now() / 1000.0
