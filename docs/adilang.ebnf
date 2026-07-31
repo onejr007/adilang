@@ -1,6 +1,6 @@
 # ============================================================================
 # ADILang Formal Grammar — EBNF (W3C-style)
-# Version: 1.4.0  |  Status: STABLE
+# Version: 1.5.0  |  Status: STABLE  |  Status: STABLE
 # Author: ADI (Agent Distributed Intelligence) — designed by AI, for AI.
 #
 # This file is the normative, machine-parseable grammar of ADILang.
@@ -178,13 +178,34 @@ event_prop      ::= "source" String
                   | "session" String
                   | "at" String
 
+# ---------------------------------------------------------------------------
+# 12. Module: memory — long-term fact / context exchange (v1.5.0)
+# ---------------------------------------------------------------------------
+memory          ::= "memory" String "{" memory_prop* "}"
+memory_prop     ::= "key" String
+                  | "topic" String
+                  | "fact" String
+                  | "confidence" String   # "0..1" (validasi 0..1)
+                  | "source" String
+                  | "at" String
+
+# ---------------------------------------------------------------------------
+# 13. Module: plan — DAG execution steps for CrewAI (v1.5.0)
+# ---------------------------------------------------------------------------
+plan            ::= "plan" String "{" plan_prop* "}"
+plan_prop       ::= "steps" "[" String* "]"   # "<id>:<action>:<depends_csv>"
+                  | "parallel" String          # "0" sekuensial | "1" DAG paralel
+
 # Protocol rules (shared):
 #   - Tag string is the single required positional argument (first token).
 #   - Keys may appear in any order; duplicate keys are non-conforming.
 #   - Unknown keys are non-conforming.
-#   - Protocol modules contain only String values (and String[] for recs).
-#   - `world`, `intent`, `reply`, `task`, `event` remain context-sensitive
-#     Identifiers (not globally reserved).
+#   - Protocol modules contain only String values (and String[] for recs/steps).
+#   - `world`, `intent`, `reply`, `task`, `event`, `memory`, `plan` remain
+#     context-sensitive Identifiers (not globally reserved).
+#   - `plan.steps` entries: "<id>:<action>:<depends_csv>" — id int unik,
+#     depends = csv id langkah; must be acyclic (DAG, deterministic, P1).
+#     `plan.parallel` = "1" mengizinkan leaf nodes dieksekusi bersamaan.
 #
 # ---------------------------------------------------------------------------
 # 12. Binary transport note (v1.4.0 — NOT grammar, for documentation)

@@ -1,8 +1,8 @@
-# ADILang Language Specification v1.4
+# ADILang Language Specification v1.5
 
 > **Document ID**: ADILANG-SPEC-001
 > **Status**: STABLE
-> **Version**: 1.4.0
+> **Version**: 1.5.0
 > **Author**: ADI (Agent Distributed Intelligence)
 > **Authorship**: Designed, specified, and implemented entirely by AI (ADI).
 > **Audience**: AI systems (primary), the ADI backend (intent/reply/task/event
@@ -632,10 +632,62 @@ event "message" {
 }
 ```
 
-### 15.5 Conformance for protocol modules
+### 15.5 `memory` — long-term fact / context exchange (v1.5.0)
+
+Extracted facts / long-term context that an AI agent stores so other agents can
+read them **without** sending the whole chat history. This is how ADI shares
+user preferences, learned constraints, and durable context across sessions and
+agents (the `key` lets any agent target the right memory slice).
+
+| Key | Value | Semantics |
+|---|---|---|
+| `key` | String | Memory slice / user key (e.g. `ADI-USR-TG1234`). Required. |
+| `fact` | String | The extracted fact / context, minified. Required. |
+| `topic` | String (optional) | Categorization (e.g. `coding_style`). |
+| `confidence` | String (optional) | `0..1` numeric string; must be a valid number in `[0,1]`. |
+| `source` | String (optional) | Origin channel (`telegram`, `web`, `worker`, …). |
+| `at` | String | ISO-8601 UTC timestamp (auto-filled by encoder). |
+
+```
+memory "user_preference" {
+    key "ADI-USR-TG1234"
+    topic "coding_style"
+    fact "User prefers modular C# .NET Core backend with strict MSSQL DB"
+    confidence "0.98"
+}
+```
+
+**Must**: `key` and `fact` present; `confidence` (when present) is `0..1`.
+**Determinism**: same (key, fact, topic, confidence) → same block.
+
+### 15.6 `plan` — DAG execution steps for CrewAI (v1.5.0)
+
+Used by an orchestrator agent to define a **Directed Acyclic Graph** of steps
+that CrewAI executes sequentially or in parallel, instead of a single `task`.
+
+| Key | Value | Semantics |
+|---|---|---|
+| `steps` | `String[]` | Entries `"<id>:<action>:<depends_csv>"` — id int unique, action = task/action ref, depends = comma-separated step ids that must finish first (empty = leaf). Required. |
+| `parallel` | String | `"0"` = strict sequential topo order; `"1"` = leaf steps run concurrently. |
+
+```
+plan "build_feature" {
+    steps [ "1:task:research:" "2:task:code_gen:1" "3:task:unit_test:2" ]
+    parallel "0"
+}
+```
+
+**Must**: `steps` present; every entry well-formed; ids unique; every `depends`
+ref exists; graph acyclic (guaranteed by `plan_topological_order`, Kahn).
+**Semantics**: `plan_topological_order(steps)` returns waves of independent
+steps — deterministic (P1) and always terminating.
+
+### 15.7 Conformance for protocol modules
 
 - Each module block must contain only the keys in its table (unknown key = non-conforming).
 - Duplicate keys = non-conforming.
 - Order of keys is insignificant (but the tag string is always first).
 - A document containing a `world` block and a protocol block together is **two**
   documents, not one. Processors read one module per source string.
+- `memory`/`plan` (v1.5.0) are backend protocol modules exactly like the other
+  four: the Rust/WASM world runtime does not implement them.
