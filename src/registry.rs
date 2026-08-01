@@ -12,7 +12,7 @@ use crate::scene::{MaterialKind, MeshKind};
 /// Versi kanonik bahasa ADILang — sumber tunggal kebenaran untuk versi.
 /// Sinkron dengan: Cargo.toml, docs/LANGUAGE.md, docs/adilang.ebnf,
 /// docs/ADILANG_KNOWLEDGE.md, dan core/adilang_protocol.py (backend ADI).
-pub const VERSION: &str = "1.8.0";
+pub const VERSION: &str = "1.9.0";
 
 // ── SUMBER TUNGGAL KEBENARAN untuk builder mesh/material ────────────────────
 // Dipakai oleh: parser.rs `is_builder()`, eval.rs `apply_mesh()/apply_material()`,
@@ -118,8 +118,8 @@ pub fn registry_text() -> String {
             "keyword: true false\n",
             "operator: + - * / % == != < > <= >= = =>\n",
             "delim: ( ) { } , [ ] :\n",
-            "protocol: intent reply task event world memory plan\n",
-            "protocolkey: mode payload verb content recs world assign input expect source key session at topic fact confidence steps parallel line token guidance\n",
+            "protocol: intent reply task event world memory plan state\n",
+            "protocolkey: mode payload verb content recs world assign input expect source key session at topic fact confidence steps parallel line token guidance user_key session_id job_id muted speaking mic_active quality status progress provider elapsed\n",
             "verb: ask inform command greet system\n",
             // ADILang Binary/Bytecode (v1.4.0) — API transport real-time
             // (bit-packing + delta, Rust → WASM → WebSocket antar-client).

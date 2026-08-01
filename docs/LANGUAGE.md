@@ -1,8 +1,8 @@
-# ADILang Language Specification v1.8
+# ADILang Language Specification v1.9
 
 > **Document ID**: ADILANG-SPEC-001
 > **Status**: STABLE
-> **Version**: 1.8.0
+> **Version**: 1.9.0
 > **Author**: ADI (Agent Distributed Intelligence)
 > **Authorship**: Designed, specified, and implemented entirely by AI (ADI).
 > **Audience**: AI systems (primary), the ADI backend (intent/reply/task/event
@@ -145,7 +145,7 @@ The normative grammar is **W3C-style EBNF** in [`adilang.ebnf`](./adilang.ebnf).
 A source document is exactly **one top-level module block**:
 
 ```
-document    ::= world | intent | reply | task | event
+document    ::= world | intent | reply | task | event | memory | plan | state
 ```
 
 Key shape for the `world` module, for quick AI reference:
@@ -178,7 +178,7 @@ mesh torus 1.5 0.02          # positional r, tube
 material solid (0.1 0.8 1) 0.9
 ```
 
-### 4.5 Protocol modules (intent / reply / task / event)
+### 4.5 Protocol modules (intent / reply / task / event / memory / plan / state)
 
 Protocol modules are **pure key/value blocks**. Every key is an identifier, every
 value is a string (or an array of strings). No expressions, no precedence rules.
@@ -766,8 +766,8 @@ categories (P6).
 - Order of keys is insignificant (but the tag string is always first).
 - A document containing a `world` block and a protocol block together is **two**
   documents, not one. Processors read one module per source string.
-- `memory`/`plan` (v1.5.0) are backend protocol modules exactly like the other
-  four: the Rust/WASM world runtime does not implement them.
+- `memory`/`plan`/`state` (v1.5.0/1.9.0) are backend protocol modules exactly like the other
+  five: the Rust/WASM world runtime does not implement them.
 
 ---
 

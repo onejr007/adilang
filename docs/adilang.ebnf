@@ -1,14 +1,14 @@
 # ============================================================================
 # ADILang Formal Grammar — EBNF (W3C-style)
-# Version: 1.8.0  |  Status: STABLE
+# Version: 1.9.0  |  Status: STABLE
 # Author: ADI (Agent Distributed Intelligence) — designed by AI, for AI.
 #
 # This file is the normative, machine-parseable grammar of ADILang.
 # It is the single source of truth for any parser/generator (human or AI).
 # ADILang is a protocol / IR language with ONE top-level module per document:
 #   world — 3D scene, implemented by the Rust/WASM world runtime
-#   intent | reply | task | event — protocol modules, implemented by the
-#   ADI backend (core/adilang_protocol.py) and by consuming AIs.
+#   intent | reply | task | event | memory | plan | state — protocol modules,
+#   implemented by the ADI backend (core/adilang_protocol.py) and consuming AIs.
 # Notation follows W3C EBNF:
 #   ::=     definition
 #   "..."   literal terminal
@@ -25,7 +25,7 @@
 # ---------------------------------------------------------------------------
 # 1. Document (top level) — exactly one module per source document
 # ---------------------------------------------------------------------------
-document        ::= world | intent | reply | task | event
+document        ::= world | intent | reply | task | event | memory | plan | state
 
 # ─── Module: world (3D scene; Rust → WASM → WebGL2) ─────────────────────────
 world           ::= "world" String "{" top_statement* "}"
@@ -149,6 +149,9 @@ Comment         ::= "#" [^\n]*                # line comment
 #   points sphere box torus icosa ring plane grid frame speak silent click
 #   intent reply task event mode payload verb content recs assign input
 #   expect source key session at
+#   memory fact topic confidence
+#   plan steps parallel
+#   state user_key speaking muted mic_active quality provider elapsed
 #   if else return while for in true false
 # Built-in identifiers (available in expressions):
 #   t mouseX mouseY PI
@@ -215,11 +218,29 @@ plan_prop       ::= "steps" "[" String* "]"   # "<id>:<action>:<depends_csv>"
 #   - Keys may appear in any order; duplicate keys are non-conforming.
 #   - Unknown keys are non-conforming.
 #   - Protocol modules contain only String values (and String[] for recs/steps).
-#   - `world`, `intent`, `reply`, `task`, `event`, `memory`, `plan` remain
+#   - `world`, `intent`, `reply`, `task`, `event`, `memory`, `plan`, `state` remain
 #     context-sensitive Identifiers (not globally reserved).
 #   - `plan.steps` entries: "<id>:<action>:<depends_csv>" — id int unik,
 #     depends = csv id langkah; must be acyclic (DAG, deterministic, P1).
-#     `plan.parallel` = "1" mengizinkan leaf nodes dieksekusi bersamaan.
+#   `plan.parallel` = "1" mengizinkan leaf nodes dieksekusi bersamaan.
+
+# ---------------------------------------------------------------------------
+# 14. Module: state — frontend/backend sync (§13, v1.9.0)
+# ---------------------------------------------------------------------------
+state           ::= "state" String "{" state_prop* "}"
+state_prop      ::= "user_key" String
+                  | "session_id" String
+                  | "job_id" String
+                  | "muted" String       # "0" false | "1" true
+                  | "speaking" String      # "0" false | "1" true
+                  | "mic_active" String    # "0" false | "1" true
+                  | "quality" String       # "menyambung" | "live" | "memproses" | "offline"
+                  | "status" String        # status teks
+                  | "progress" String      # nilai 0..100
+                  | "provider" String      # nama provider LLM aktif
+                  | "elapsed" String       # detik sejak call start
+                  | "at" String            # ISO timestamp
+# Required: user_key, at. All other fields optional.
 #
 # ---------------------------------------------------------------------------
 # 14. Tooling & Formal Verification (v1.7.0 — NOT grammar, for documentation)

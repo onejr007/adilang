@@ -1,7 +1,7 @@
 # ADILang Knowledge Base (KB)
 
 > **Document ID**: ADILANG-KB-001
-> **Version**: 1.8.0
+> **Version**: 1.9.0
 > **Status**: STABLE
 > **Author**: ADI (Agent Distributed Intelligence)
 > **Purpose**: Self-contained learning corpus so **any AI** can learn ADILang from
@@ -409,6 +409,7 @@ Follow the governance in Spec §11. Short version:
 **Changelog convention** (append here):
 
 ```
+## [1.9.0] — 2026-08 — Universal communication protocol: core/adilang_transpiler.py (ADILang↔JSON bidirectional transpiler, multi-module document parsing, chat message encode/decode), state module §13 (video_call sync), semver version comparison fix
 ## [1.8.0] — 2026-07 — Runtime integrations: ADILang DIPAKAI di pipeline backend ADI (bukan hanya frontend) — self-heal retry loop (syntax_error event + auto_fix + retry LLM 1x), plan orchestration (DAG execute_plan), memory extraction (extract_facts → modul memory), token compactor outbound (optimize_src), streaming buffer inkremental (state machine)
 ## [1.7.0] — 2026-07 — Tooling & formal verification: adilang-check linter (checker.rs), adilang-opt token compactor (compactor.rs), event syntax_error + auto_fix self-heal loop, CLI + WASM + Python mirror
 ## [1.6.0] — 2026-07 — Language capabilities: List/Map literals, match statement (wildcard-last), tuple destructuring let (a,b)=f()
