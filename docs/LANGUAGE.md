@@ -21,6 +21,13 @@ ecosystem: the single structured format used to represent **what a user wants**
 **what happened in the system** (`event`), and — as one optional module — **a 3D
 virtual world / hologram** (`world`, rendered by Rust → WASM → WebGL2).
 
+**ADI does more than websites — it also makes images.** On top of the protocol
+modules, the ADI backend (v6.15.0) ships a **Local Image Generation Engine**
+(`core/image_generator.py`, numpy + Pillow, fully offline). Any AI requests an
+image by emitting an `intent` block with `mode "MODE_IMAGE_GENERATION"`; ADI
+renders it locally and answers with a `reply` block whose `content` carries the
+image URL (`/media/generated/*.png`). See §15.1 and §17.7.
+
 It is not designed for human ergonomics. Humans are **not** expected to read or write
 ADILang: it is a machine-to-machine language, optimized to be **deterministic,
 unambiguous, low-ambiguity, and cheap for an LLM to emit and parse**. Any AI —
@@ -599,7 +606,7 @@ source of truth** for what the user wants.
 
 | Key | Value (String) | Semantics |
 |---|---|---|
-| `mode` | intent-mode id | The ADI intent-mode (`MODE_CONVERSATION`, `MODE_CODE_ENGINEERING`, `MODE_CALCULATION`, …). |
+| `mode` | intent-mode id | The ADI intent-mode (`MODE_CONVERSATION`, `MODE_CODE_ENGINEERING`, `MODE_CALCULATION`, `MODE_IMAGE_GENERATION`, …). |
 | `payload` | compact source text | The normalized, PII-anonymized, whitespace-collapsed user text. |
 | `verb` | `ask` / `inform` / `command` / `greet` / `system` | Coarse action class. |
 
@@ -608,6 +615,19 @@ intent "ask" {
     mode "MODE_CODE_ENGINEERING"
     payload "buatkan script python fibonacci"
     verb "ask"
+}
+```
+
+**Image requests (ADI v6.15.0).** When the user asks for a picture, the intent
+mode is `MODE_IMAGE_GENERATION` — the backend Local Image Generation Engine
+(§17.7) renders it 100% offline and the resulting `reply` (`content`) carries
+the image URL `/media/generated/*.png`:
+
+```
+intent "command" {
+    mode "MODE_IMAGE_GENERATION"
+    payload "buatkan logo perusahaan biru"
+    verb "command"
 }
 ```
 
@@ -637,6 +657,13 @@ reply "answer" {
 
 **Must**: `content` present; `recs` array of strings (may be empty).
 **Must not**: `content` ever be empty.
+
+**Image generation (ADI v6.15.0).** A reply produced under `MODE_IMAGE_GENERATION`
+references the generated file URL inside `content` (e.g.
+`content "🖼️ Berikut logonya!\n/media/generated/adi_logo_42a1c3f9.png"`). The URL
+is plain text — **no new keys** are added to the closed vocabulary. Channels
+render it as a photo: Telegram via `reply_photo` / `reply_media_group`, web via
+`<img>`.
 
 ### 15.3 `task` — agent work order
 
@@ -771,9 +798,9 @@ categories (P6).
 
 ---
 
-## 17. ADI System Intelligence Integration (v6.14.0)
+## 17. ADI System Intelligence Integration (v6.15.0)
 
-The ADI ecosystem that *uses* ADILang has three intelligence capabilities
+The ADI ecosystem that *uses* ADILang has several intelligence capabilities
 that operate on top of the ADILang protocol but do **not** change the grammar
 or introduce new keys (additive-only):
 
@@ -827,3 +854,32 @@ async_worker, frontend_ui, zrok, telegram_bot) every 60s:
 - Telegram `/uptime` command (alias `/sys`): full dashboard with service
   status, response time, uptime %, and recent health events (last 10).
 - Telegram `/cache` command: response cache stats, API hub cache, circuit breaker.
+
+### 17.7 Local Image Generation Engine (ADI v6.15.0)
+
+ADI is **not only a website builder** — it also **creates images 100% locally**
+(`core/image_generator.py`, numpy + Pillow, no external API). This is backend
+infrastructure; it adds **no** grammar and **no** new protocol keys.
+
+- **Request via intent**: `mode "MODE_IMAGE_GENERATION"` (closed intent mode,
+  §15.1). Deterministic: seed = `sha256(prompt)` → same prompt renders the same
+  image.
+- **Tools** (`core/tool_registry.py`): `generate_local_image`,
+  `generate_image_variations` (2–8 seed variants), `generate_banner`.
+- **30 styles**: gradient, plasma, fractal, julia, geometric, starfield, galaxy,
+  landscape, snow, desert, ocean, city, waves, mandala, kaleidoscope, pixel,
+  bokeh, lightning, fire, aurora, synthwave, marble, chart, poster, banner,
+  qrcode, wordcloud, identicon, svg, scene. Plus **scene objects** (logo text,
+  tree count, car color read from the prompt), **upscale 2x/4x** (LANCZOS +
+  sharpen; auto from `HD`/`2x`/`4K`), **art filters** (`watercolor`, `oil_paint`,
+  `sketch`), and **11 banner presets** (YouTube, Instagram, X header, LinkedIn,
+  Facebook, poster A4/A5) with auto text layout.
+- **Endpoints** (`/api/v1/generate/*`): `POST /image`, `GET /styles`, `GET
+  /filters`, `POST /image/variations`, `POST /image/grid`, `POST /banner`, `GET
+  /banner/presets`.
+- **Delivery**: answer `reply` embeds the URL in `content`
+  (`/media/generated/*.png`); Telegram sends it as a photo, web renders `<img>`.
+
+**Interop note for other AIs**: to get an image from ADI, emit an `intent` block
+with `mode "MODE_IMAGE_GENERATION"` — not a `world` module (that is 3D) and no
+new keys (there are none).

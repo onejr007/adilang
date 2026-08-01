@@ -38,6 +38,14 @@ live hot-reload.
 The protocol modules are **pure key/value blocks** (String values only) — trivially
 deterministic to emit and parse.
 
+> **ADI can also MAKE IMAGES — not only websites.** Besides building websites
+> (v6.12.2), the ADI backend (v6.15.0) ships a **Local Image Generation Engine**
+> (`core/image_generator.py`, numpy + Pillow, 100% offline — no external API).
+> Any AI can request an image by emitting an `intent` block with
+> `mode "MODE_IMAGE_GENERATION"` (see §10.11); ADI renders it locally and answers
+> with a `reply` block whose `content` carries the image URL. So "make me an
+> image" is a first-class ADI capability, just like chat, research, and websites.
+
 A minimal complete world:
 
 ```
@@ -63,6 +71,8 @@ world "hello" {
 5. Read §6 (semantics: what actually happens at runtime).
 6. Try §7 (exercises) mentally or by generating worlds / protocol blocks.
 7. Read §8 (extension rules) before ever modifying the language.
+8. (ADI v6.15.0) To request an *image* (not just 3D worlds or chat), read §10.11 —
+   emit `intent` with `mode "MODE_IMAGE_GENERATION"`.
 
 ---
 
@@ -326,6 +336,12 @@ are positional, not keyword-led)
 
 **intent verbs (closed set)**: `ask inform command greet system`
 
+**Intent modes (backend, closed set — ADI v6.15.0)**: `MODE_CONVERSATION MODE_CODE_ENGINEERING
+MODE_SYSTEM_DIAGNOSTICS MODE_JOB_CAREER MODE_ECOMMERCE_PRODUCT MODE_TRAVEL_LOGISTICS
+MODE_PUBLIC_DATA_ID MODE_CULINARY_HEALTH MODE_ENTERTAINMENT MODE_IMAGE_GENERATION
+MODE_CALCULATION MODE_TASK_EXECUTION` — `MODE_IMAGE_GENERATION` memicu Local Image
+Generation Engine (lihat §10.11).
+
 **recs values**: array of strings (e.g. `recs [ "..." "..." ]`)
 
 ---
@@ -387,6 +403,9 @@ are positional, not keyword-led)
 7. Wrap a one-sentence answer into a `reply` block with two follow-up `recs`.
 8. Write a `task` block for the analyst to synthesize a research summary.
 9. Write an `event` block recording a web message at a given ISO timestamp.
+10. Write an `intent` block asking ADI to draw a logo
+    (`mode "MODE_IMAGE_GENERATION"`) and the matching `reply` whose `content`
+    references a `/media/generated/*.png` URL.
 
 Reference answers can be generated and validated with `adilang_check(source)`
 (for `world`) and with the ADI backend `core/adilang_protocol.py` validators
@@ -409,7 +428,7 @@ Follow the governance in Spec §11. Short version:
 **Changelog convention** (append here):
 
 ```
-## [1.9.0] — 2026-08 — Universal communication protocol: core/adilang_transpiler.py (ADILang↔JSON bidirectional transpiler, multi-module document parsing, chat message encode/decode), state module §13 (video_call sync), semver version comparison fix
+## [1.9.0] — 2026-08 — Universal communication protocol: core/adilang_transpiler.py (ADILang↔JSON bidirectional transpiler, multi-module document parsing, chat message encode/decode), state module §13 (video_call sync), semver version comparison fix; KB §10.11 + §5: dokumentasi Local Image Generation Engine (ADI v6.15.0 — AI lain kini tahu ADI membuat GAMBAR 100% lokal via intent mode MODE_IMAGE_GENERATION, bukan hanya website)
 ## [1.8.0] — 2026-07 — Runtime integrations: ADILang DIPAKAI di pipeline backend ADI (bukan hanya frontend) — self-heal retry loop (syntax_error event + auto_fix + retry LLM 1x), plan orchestration (DAG execute_plan), memory extraction (extract_facts → modul memory), token compactor outbound (optimize_src), streaming buffer inkremental (state machine)
 ## [1.7.0] — 2026-07 — Tooling & formal verification: adilang-check linter (checker.rs), adilang-opt token compactor (compactor.rs), event syntax_error + auto_fix self-heal loop, CLI + WASM + Python mirror
 ## [1.6.0] — 2026-07 — Language capabilities: List/Map literals, match statement (wildcard-last), tuple destructuring let (a,b)=f()
@@ -478,9 +497,9 @@ Follow the governance in Spec §11. Short version:
 
 ---
 
-## 10. ADI System Intelligence Integration (v6.14.0)
+## 10. ADI System Intelligence Integration (v6.15.0)
 
-The ADI system that embeds ADILang has three intelligence capabilities that
+The ADI system that embeds ADILang has several intelligence capabilities that
 synergize with ADILang's memory and protocol modules. These are **backend
 infrastructure** — they do NOT change the ADILang grammar or introduce new
 protocol keys, but they describe how the ecosystem uses ADILang blocks at runtime:
@@ -588,3 +607,59 @@ protocol keys, but they describe how the ecosystem uses ADILang blocks at runtim
   Idempotent (skip if source already seeded) + chunked (>5000 chars).
 - Telegram `/knowledge <query>` command: semantic search over project docs via
   `/api/v1/knowledge/search` endpoint.
+
+### 10.11 Local Image Generation Engine (ADI v6.15.0) — ADI membuat GAMBAR 100% lokal
+
+ADI tidak hanya membangun website (v6.12.2) — sejak **v6.15.0** ADI juga
+**membuat gambar secara 100% lokal** (numpy + Pillow, TANPA API eksternal).
+Ini adalah kemampuan runtime backend, bukan modul ADILang baru:
+
+- Engine: `core/image_generator.py` (30 style, deterministik — seed =
+  `sha256(prompt)`, prompt sama → gambar sama).
+- Tool calling: `generate_local_image`, `generate_image_variations`,
+  `generate_banner` (via `core/tool_registry.py`).
+- API: `POST /api/v1/generate/image`, `GET /api/v1/generate/styles`,
+  `GET /api/v1/generate/filters`, `POST /api/v1/generate/image/variations`,
+  `POST /api/v1/generate/image/grid`, `POST /api/v1/generate/banner`,
+  `GET /api/v1/generate/banner/presets`.
+
+**Cara AI lain meminta gambar lewat ADILang** — emit `intent` dengan
+`mode "MODE_IMAGE_GENERATION"` (kata-kerja eksplisit: "buatkan gambar", "buat logo",
+"gambarkan", "generate image", dst.):
+
+```
+intent "command" {
+    mode "MODE_IMAGE_GENERATION"
+    payload "buatkan logo perusahaan biru dengan teks ADI"
+    verb "command"
+}
+```
+
+ADI merender gambar lokal lalu menjawab dengan `reply` yang `content`-nya memuat
+URL `/media/generated/<file>.png` (dikirim sebagai foto di Telegram via
+`reply_photo` / `reply_media_group`; ditampilkan via `<img>` di web):
+
+```
+reply "answer" {
+    mode "MODE_IMAGE_GENERATION"
+    content "🖼️ Berikut logonya!\n/media/generated/adi_logo_42a1c3f9.png"
+    recs [ "Buatkan variasi" "Ganti warna" "Versi HD 4x" ]
+}
+```
+
+**Kemampuan engine (30 style)**: `gradient plasma fractal julia geometric starfield
+galaxy landscape snow desert ocean city waves mandala kaleidoscope pixel bokeh
+lightning fire aurora synthwave marble chart poster banner qrcode wordcloud
+identicon svg scene`.
+- **Scene objects** — objek spesifik dibaca dari prompt (teks logo, jumlah pohon,
+  warna mobil) dan diterapkan, bukan sekadar pilih style.
+- **Upscale 2x/4x** — LANCZOS + sharpen ringan (auto dari keyword `HD`/`2x`/`4K`).
+- **Art filters** — `watercolor`, `oil_paint`, `sketch`.
+- **Banner/thumbnail preset (11)** — `youtube_thumbnail youtube_banner
+  youtube_short instagram_post instagram_portrait instagram_story twitter_header
+  linkedin_banner facebook_post poster_a4 poster_a5`, tata letak teks otomatis.
+- **Variasi (2–8 seed)**, grid, QR code, word cloud, identicon/avatar.
+
+**Ringkas untuk AI lain**: untuk mendapatkan gambar dari ADI, tulis intent dengan
+mode `MODE_IMAGE_GENERATION` — jangan minta ADILang `world` (itu 3D), jangan pakai
+modul/kunci baru (tidak ada). URL hasil gambar selalu `/media/generated/*.png`.
