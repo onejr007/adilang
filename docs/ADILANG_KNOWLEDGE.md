@@ -563,3 +563,27 @@ protocol keys, but they describe how the ecosystem uses ADILang blocks at runtim
   response time, uptime %, and recent health events (last 10).
 - 16 unit tests covering service names, response time parsing, event retention,
   uptime %, full status fields, and 7-service concurrent checks.
+
+### 10.8 Rate Limiting Middleware
+- `app/redis_client.py`: `check_api_rate_limit(user_key)` + `api_rate_limit_ttl()`
+  implement sliding window (20 requests/60s per ADI user key) using Redis
+  (with in-memory fallback). Telegram bot rate limiter (`tg_check_rate_limit`,
+  8 req/30s per chat) sudah ada sejak v6.8.0.
+- `/api/v1/chat` endpoint: rate limit check with HTTP 429 + `Retry-After` header.
+
+### 10.9 Structured JSON Logging + Global Error Handler
+- New `core/structured_logger.py`: `StructuredFormatter` (JSON output with
+  timestamp, level, logger, message, extra fields, exception info) +
+  `StructuredLoggerAdapter` (extra fields via kwargs, e.g.
+  `logger.info("msg", user_key="usr-123", latency=42)`). Pure stdlib.
+- Telegram bot: replaced `logging.basicConfig` with structured logger; added
+  global `_error_handler` that captures unhandled exceptions with chat_id,
+  user_key, error_type, traceback — logs structured JSON + notifies user.
+
+### 10.10 Knowledge Base RAG Ingestion
+- `core/memory.py`: `_seed_project_documentation()` ingests project docs
+  (ROADMAP.md, DECISION_LOG.md, TASK_BOARD.md, ONBOARDING.md, AGENTS_GUIDE.md,
+  WORKSPACE_SUMMARY.md) into `knowledge_base` ChromaDB collection.
+  Idempotent (skip if source already seeded) + chunked (>5000 chars).
+- Telegram `/knowledge <query>` command: semantic search over project docs via
+  `/api/v1/knowledge/search` endpoint.
