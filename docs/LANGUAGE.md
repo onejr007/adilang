@@ -795,3 +795,35 @@ finds relevant `memory` and `event "fact_memory"` blocks by semantic relevance.
 `_summarize_conversation_batch()` via litellm (Groq/OpenRouter) to produce
 1-2 sentence summaries. Fallbacks: keyword extraction, then concatenation.
 Summaries stored as KB documents (`category=consolidated_chat`).
+
+### 17.4 Public API Hub Caching + Circuit Breaker
+`core/public_api_hub.py` implements:
+- In-memory response cache (TTL 300s, max 200 entries) for GET requests —
+  deterministic hash of URL + params + headers as cache key.
+- Per-domain circuit breaker: 5 consecutive failures → OPEN (30s) →
+  HALF_OPEN → CLOSED. Fail-fast prevents cascading failures.
+- Public methods: `cache_stats()`, `circuit_stats()`, `cache_clear()`.
+- Config via `knowledge_registry.get("api_infra.*")`.
+
+### 17.5 Response Cache Optimization
+`core/response_cache.py` (`SemanticResponseCache`):
+- Sorted set index (`adi:response_cache:index`) replaces O(N) Redis SCAN
+  with O(K) ZRANGE for cache lookups.
+- `_prune_expired()` removes stale entries via ZREMRANGEBYSCORE (O(log N)).
+- TTL modes: SHORT (300s, weather/crypto), MEDIUM (3600s, default),
+  LONG (86400s, facts). LRU eviction: in-memory bounded at 500 entries.
+- `stats()` returns hits/misses/errors/hit_rate%; `clear_all()` flushes.
+- Wired into `core/crew.py`: cache GET before LLM call (skip LLM on hit),
+  cache SET after LLM response (>20 chars only).
+
+### 17.6 Health Monitor v1.1 — Extended Service Monitoring
+`core/health_monitor.py` monitors 7 services (backend_api, redis, rabbitmq,
+async_worker, frontend_ui, zrok, telegram_bot) every 60s:
+- Response time tracking: each check returns `(latency_ms)` in status string;
+  parsed and stored per-service.
+- Event history: 72h retention (maxlen=100), pruned on each event.
+- `get_full_status()` returns: services, failure_counts, response_times_ms,
+  uptime_pct per service, error_messages, healthy_count, recent_events.
+- Telegram `/uptime` command (alias `/sys`): full dashboard with service
+  status, response time, uptime %, and recent health events (last 10).
+- Telegram `/cache` command: response cache stats, API hub cache, circuit breaker.
