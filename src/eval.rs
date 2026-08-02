@@ -3,7 +3,7 @@
 
 use std::collections::HashMap;
 
-use crate::ast::{BinOp, EventKind, Expr, FuncDef, Prop, Stmt, TopLevel};
+use crate::ast::{BinOp, ComponentDef, EventKind, Expr, FuncDef, LifecycleHookKind, Prop, Stmt, TopLevel};
 use crate::scene::{EntityState, LightKind, LightState, MaterialKind, MeshKind, MeshParams, World};
 
 #[derive(Debug, Clone, PartialEq)]
@@ -39,6 +39,15 @@ impl Value {
 /// hang. Nilai ekspresif cukup untuk animasi/frame tanpa risiko infinite loop.
 pub const MAX_LOOP_ITERATIONS: usize = 100_000;
 
+/// Hasil eksekusi directive `@name(args)` pada lifecycle hook (v1.13.0).
+/// Runtime (JS/host) memakai daftar ini untuk menjalankan aksi nyata —
+/// evaluator native hanya menangkap argumen yang sudah dievaluasi.
+#[derive(Debug, Clone, PartialEq)]
+pub struct DirectiveCall {
+    pub name: String,
+    pub args: Vec<Value>,
+}
+
 pub struct Interpreter {
     pub world: World,
     globals: HashMap<String, Value>,
@@ -54,6 +63,10 @@ pub struct Interpreter {
     pub mouse_x: f64,
     pub mouse_y: f64,
     current_entity: Option<String>,
+    /// Komponen + lifecycle hooks (v1.13.0) yang terdaftar oleh `load`.
+    pub components: Vec<ComponentDef>,
+    /// Accumulator directive yang dieksekusi saat menjalankan hook.
+    directive_calls: Vec<DirectiveCall>,
 }
 
 impl Interpreter {
@@ -68,6 +81,8 @@ impl Interpreter {
             mouse_x: 0.0,
             mouse_y: 0.0,
             current_entity: None,
+            components: Vec::new(),
+            directive_calls: Vec::new(),
         }
     }
 
@@ -77,6 +92,8 @@ impl Interpreter {
         self.globals.clear();
         self.scopes.clear();
         self.functions.clear();
+        self.components.clear();
+        self.directive_calls.clear();
 
         // Pass 1: kumpulkan fungsi & let global
         for item in &program.items {
@@ -87,6 +104,14 @@ impl Interpreter {
                 TopLevel::Let { name, value } => {
                     let v = self.eval_expr(value)?;
                     self.globals.insert(name.clone(), v);
+                }
+                TopLevel::World(s) | TopLevel::Spatial3D(s) => {
+                    for si in &s.items {
+                        self.process_spatial_item_pass1(si)?;
+                    }
+                }
+                TopLevel::Component(c) => {
+                    self.components.push(c.clone());
                 }
                 _ => {}
             }
@@ -120,7 +145,6 @@ impl Interpreter {
                     for p in &l.props {
                         self.apply_light_prop(&mut light, p)?;
                     }
-                    // replace bila id sama
                     if let Some(existing) = self.world.lights.iter_mut().find(|x| x.id == light.id) {
                         *existing = light;
                     } else {
@@ -142,8 +166,80 @@ impl Interpreter {
                     }
                     self.world.entities.push(entity);
                 }
+                TopLevel::World(s) | TopLevel::Spatial3D(s) => {
+                    for si in &s.items {
+                        self.process_spatial_item_pass2(si)?;
+                    }
+                }
                 _ => {}
             }
+        }
+        Ok(())
+    }
+
+    fn process_spatial_item_pass1(&mut self, item: &crate::ast::SpatialItem) -> Result<(), String> {
+        match item {
+            crate::ast::SpatialItem::Func(f) => {
+                self.functions.insert(f.name.clone(), f.clone());
+            }
+            crate::ast::SpatialItem::Let { name, value } => {
+                let v = self.eval_expr(value)?;
+                self.globals.insert(name.clone(), v);
+            }
+            _ => {}
+        }
+        Ok(())
+    }
+
+    fn process_spatial_item_pass2(&mut self, item: &crate::ast::SpatialItem) -> Result<(), String> {
+        match item {
+            crate::ast::SpatialItem::Handler(h) => match h.event {
+                EventKind::Frame => self.world.frame_handlers.push(h.clone()),
+                EventKind::Speak => self.world.speak_handlers.push(h.clone()),
+                EventKind::Silent => self.world.silent_handlers.push(h.clone()),
+                EventKind::Click => self.world.click_handlers.push(h.clone()),
+            },
+            crate::ast::SpatialItem::Camera(c) => {
+                let mut cam = self.world.camera.clone();
+                cam.id = c.id.clone();
+                for p in &c.props {
+                    self.apply_camera_prop(&mut cam, p)?;
+                }
+                self.world.camera = cam;
+            }
+            crate::ast::SpatialItem::Light(l) => {
+                let mut light = LightState {
+                    id: l.id.clone(),
+                    kind: LightKind::Point,
+                    pos: [0.0, 0.0, 0.0],
+                    color: [1.0, 1.0, 1.0],
+                    intensity: 1.0,
+                };
+                for p in &l.props {
+                    self.apply_light_prop(&mut light, p)?;
+                }
+                if let Some(existing) = self.world.lights.iter_mut().find(|x| x.id == light.id) {
+                    *existing = light;
+                } else {
+                    self.world.lights.push(light);
+                }
+            }
+            crate::ast::SpatialItem::Entity(e) => {
+                let mut entity = EntityState {
+                    id: e.id.clone(),
+                    transform: Default::default(),
+                    color: [1.0, 1.0, 1.0, 1.0],
+                    material: MaterialKind::Wire,
+                    mesh: MeshKind::Sphere,
+                    mesh_params: MeshParams::default(),
+                    handlers: e.handlers.clone(),
+                };
+                for p in &e.props {
+                    self.apply_entity_prop(&mut entity, p)?;
+                }
+                self.world.entities.push(entity);
+            }
+            _ => {}
         }
         Ok(())
     }
@@ -526,7 +622,44 @@ impl Interpreter {
                     "match tanpa arm yang cocok: {subj:?} (tidak ada wildcard)"
                 ))
             }
+            // Directive statements (v1.12.0): aksi runtime dikirim ke engine
+            // (JS/router/locale). Di evaluator native (tanpa DOM) keduanya no-op
+            // deterministik — hanya validasi sintaks yang terjadi di parser.
+            Stmt::Navigate { .. } => Ok(None),
+            Stmt::SetLocale { .. } => Ok(None),
+            // Directive generik (v1.13.0): argumen dievaluasi, panggilan
+            // ditangkap ke `directive_calls` untuk dikumpulkan `run_lifecycle`.
+            Stmt::Directive { name, args } => {
+                let mut values = Vec::new();
+                for a in args {
+                    values.push(self.eval_expr(a)?);
+                }
+                self.directive_calls.push(DirectiveCall { name: name.to_string(), args: values });
+                Ok(None)
+            }
         }
+    }
+
+    /// Jalankan lifecycle hook component (v1.13.0): `on_mount` / `on_update` /
+    /// `on_unmount`. Mengembalikan directive calls yang dieksekusi selama hook
+    /// berjalan (diurutkan sesuai eksekusi). Hook tanpa directive → daftar kosong.
+    pub fn run_lifecycle(
+        &mut self,
+        name: &str,
+        kind: LifecycleHookKind,
+    ) -> Result<Vec<DirectiveCall>, String> {
+        let comp = self.components.iter().find(|c| c.name == name).cloned().ok_or_else(|| {
+            format!("Component '{name}' tidak terdaftar (deklarasi `component` tidak ditemukan)")
+        })?;
+        let hook = comp
+            .hooks
+            .iter()
+            .find(|h| h.kind == kind)
+            .cloned()
+            .ok_or_else(|| format!("Component '{name}' tanpa hook {}", kind.as_str()))?;
+        self.directive_calls.clear();
+        self.run_block(&hook.body)?;
+        Ok(std::mem::take(&mut self.directive_calls))
     }
 
     pub fn run_handler(&mut self, entity_id: Option<String>, body: &[Stmt]) -> Result<(), String> {
@@ -664,6 +797,12 @@ impl Interpreter {
                 let b = args.get(1).map(|a| a.as_num()).transpose()?.unwrap_or(0.0);
                 let k = args.get(2).map(|a| a.as_num()).transpose()?.unwrap_or(0.0);
                 Ok(Value::Num(a + (b - a) * k))
+            }
+            // i18n marker (v1.12.0): t("key") — di evaluator native tanpa kamus
+            // locale, resolve deterministik ke kunci mentah (fallback i18n).
+            "t" => {
+                let key = args.first().map(|a| a.clone()).unwrap_or(Value::Str(String::new()));
+                Ok(key)
             }
             _ => {
                 if let Some(f) = self.functions.get(name).cloned() {

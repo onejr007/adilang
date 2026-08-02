@@ -148,6 +148,14 @@ impl Engine {
         self.proj = math3d::perspective(fov, aspect, 0.1, 200.0);
     }
 
+    /// Snapshot viewport (vision) — data URL PNG dari frame terakhir canvas.
+    /// Dipakai AI utk melihat adegan dari sisi klien tanpa image pipeline.
+    pub fn capture_viewport_snapshot(&self) -> Result<String, String> {
+        self.canvas
+            .to_data_url()
+            .map_err(|e| format!("capture_viewport_snapshot: {e:?}"))
+    }
+
     /// Bangun ulang GPU mesh untuk semua entity.
     pub fn build_meshes(&mut self) -> Result<(), String> {
         self.mesh_map.clear();

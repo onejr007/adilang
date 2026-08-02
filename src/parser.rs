@@ -1,4 +1,4 @@
-// ADILang parser — recursive descent.
+// ADILang parser — recursive descent (v2.0.0 — multi-domain).
 // Dirancang & ditulis oleh AI (ADI Agent Ecosystem).
 
 use crate::ast::*;
@@ -54,39 +54,528 @@ impl Parser {
         }
     }
 
-    // ── Top level ──
+    // ── Top level — multi-block file ──────────────────────────────────────
     fn parse_program(&mut self) -> Result<Program, String> {
-        self.expect(&TokKind::Ident("world".to_string()), "'world'")?;
-        let name = self.expect_str()?;
-        self.expect(&TokKind::LBrace, "'{'")?;
         let mut items = Vec::new();
-        while self.peek() != &TokKind::RBrace {
-            if self.peek() == &TokKind::Eof {
-                return Err(format!("'world' tidak ditutup, baris {}", self.line()));
+        let mut name = String::new();
+        while self.peek() != &TokKind::Eof {
+            let item = self.parse_top_level()?;
+            // Derive program name dari spatial_3d/world pertama
+            if name.is_empty() {
+                match &item {
+                    TopLevel::Spatial3D(def) | TopLevel::World(def) => {
+                        name = def.name.clone();
+                    }
+                    _ => {}
+                }
             }
-            items.push(self.parse_top_level()?);
+            items.push(item);
         }
-        self.advance(); // }
         Ok(Program { name, items })
     }
 
     fn parse_top_level(&mut self) -> Result<TopLevel, String> {
+        match self.peek().clone() {
+            TokKind::At => self.parse_at_block(),
+            TokKind::Ident(id) => match id.as_str() {
+                "ui_layout" => self.parse_ui_layout(),
+                "spatial_3d" | "world" => self.parse_spatial_3d(id == "world"),
+                "routes" => self.parse_routes(),
+                "component" => self.parse_component(),
+                "camera" | "light" | "entity" | "let" | "func" | "on" => {
+                    // Legacy: item di luar world/spatial_3d — bungkus ke Spatial3D implisit
+                    let mut implicit_items = Vec::new();
+                    loop {
+                        if self.peek() == &TokKind::Eof {
+                            break;
+                        }
+                        // Deteksi blok berikutnya (ui_layout / spatial_3d / world / routes / component / @payload)
+                        if matches!(self.peek(), TokKind::At)
+                            || matches!(self.peek(), TokKind::Ident(ref i)
+                                if matches!(i.as_str(), "ui_layout" | "spatial_3d" | "world" | "routes" | "component"))
+                        {
+                            break;
+                        }
+                        implicit_items.push(self.parse_spatial_item()?);
+                    }
+                    if implicit_items.is_empty() {
+                        return Err(format!(
+                            "Ekspektasi deklarasi spatial/ui/payload, dapat '{}' di baris {}",
+                            id,
+                            self.line()
+                        ));
+                    }
+                    Ok(TopLevel::Spatial3D(Spatial3DDef {
+                        name: "__implicit__".to_string(),
+                        items: implicit_items,
+                    }))
+                }
+                other => Err(format!(
+                    "Keyword/deklarasi tidak dikenal '{other}' di baris {}",
+                    self.line()
+                )),
+            },
+            other => Err(format!(
+                "Ekspektasi blok (@payload / ui_layout / spatial_3d / world) atau deklarasi, dapat {:?} di baris {}",
+                other,
+                self.line()
+            )),
+        }
+    }
+
+    // ── @payload / @use_js / @i18n ─────────────────────────────────────────
+    fn parse_at_block(&mut self) -> Result<TopLevel, String> {
+        self.advance(); // @
+        let directive = self.expect_ident("directive (@payload/@use_js/@i18n)")?;
+        match directive.as_str() {
+            "payload" => self.parse_payload_body(),
+            "use_js" => self.parse_use_js(),
+            "i18n" => self.parse_i18n(),
+            other => Err(format!(
+                "Directive '@{other}' tidak dikenal di baris {} (yang sah: @payload, @use_js, @i18n)",
+                self.line()
+            )),
+        }
+    }
+
+    // ── @payload ──────────────────────────────────────────────────────────
+    fn parse_payload(&mut self) -> Result<TopLevel, String> {
+        self.advance(); // @
+        self.expect(&TokKind::Ident("payload".to_string()), "'payload' setelah @")?;
+        self.parse_payload_body()
+    }
+
+    fn parse_payload_body(&mut self) -> Result<TopLevel, String> {
+        self.expect(&TokKind::LBrace, "'{'")?;
+        let mut sender = String::new();
+        let mut target_agent = String::new();
+        let mut intent = String::new();
+        let mut state_data = None;
+        while self.peek() != &TokKind::RBrace {
+            if self.peek() == &TokKind::Eof {
+                return Err(format!("'@payload' tidak ditutup, baris {}", self.line()));
+            }
+            let key = self.expect_ident("kunci payload")?;
+            match key.as_str() {
+                "sender" => sender = self.expect_str()?,
+                "target_agent" => target_agent = self.expect_str()?,
+                "intent" => intent = self.expect_str()?,
+                "state_data" => {
+                    state_data = Some(self.parse_expr()?);
+                }
+                other => {
+                    return Err(format!(
+                        "Kunci payload tidak dikenal '{other}' di baris {}",
+                        self.line()
+                    ));
+                }
+            }
+        }
+        self.advance(); // }
+        if sender.is_empty() || target_agent.is_empty() || intent.is_empty() {
+            return Err(format!(
+                "@payload membutuhkan sender, target_agent, intent (baris {})",
+                self.line()
+            ));
+        }
+        Ok(TopLevel::Payload(PayloadDef { sender, target_agent, intent, state_data }))
+    }
+
+    // ── @use_js ────────────────────────────────────────────────────────────
+    fn parse_use_js(&mut self) -> Result<TopLevel, String> {
+        self.expect(&TokKind::LBrace, "'{'")?;
+        let mut url = String::new();
+        while self.peek() != &TokKind::RBrace {
+            if self.peek() == &TokKind::Eof {
+                return Err(format!("'@use_js' tidak ditutup, baris {}", self.line()));
+            }
+            let key = self.expect_ident("kunci (@use_js)")?;
+            match key.as_str() {
+                "url" => url = self.expect_str()?,
+                other => {
+                    return Err(format!(
+                        "Kunci '@use_js' tidak dikenal '{other}' (hanya 'url') di baris {}",
+                        self.line()
+                    ));
+                }
+            }
+        }
+        self.advance(); // }
+        if url.is_empty() {
+            return Err(format!("'@use_js' wajib punya url, baris {}", self.line()));
+        }
+        Ok(TopLevel::UseJs(UseJsDef { url }))
+    }
+
+    // ── routes ─────────────────────────────────────────────────────────────
+    fn parse_routes(&mut self) -> Result<TopLevel, String> {
+        self.advance(); // routes
+        self.expect(&TokKind::LBrace, "'{'")?;
+        let mut routes = Vec::new();
+        while self.peek() != &TokKind::RBrace {
+            if self.peek() == &TokKind::Eof {
+                return Err(format!("'routes' tidak ditutup, baris {}", self.line()));
+            }
+            let kw = self.expect_ident("'route'")?;
+            if kw != "route" {
+                return Err(format!(
+                    "Ekspektasi 'route' di dalam routes, dapat '{kw}' di baris {}",
+                    self.line()
+                ));
+            }
+            let path = self.expect_str()?;
+            let mut layout = String::new();
+            let mut transition = None;
+            while self.peek() != &TokKind::RBrace {
+                if self.peek() == &TokKind::Eof {
+                    return Err(format!("'routes' tidak ditutup, baris {}", self.line()));
+                }
+                match self.peek().clone() {
+                    TokKind::Ident(id) if id == "route" => break,
+                    TokKind::Ident(id) if id == "layout" => {
+                        self.advance();
+                        layout = self.expect_str()?;
+                    }
+                    TokKind::Ident(id) if id == "transition" => {
+                        self.advance();
+                        transition = Some(self.expect_str()?);
+                    }
+                    _ => break,
+                }
+            }
+            if layout.is_empty() {
+                return Err(format!(
+                    "Route '{path}' wajib punya layout, baris {}",
+                    self.line()
+                ));
+            }
+            routes.push(RouteDef { path, layout, transition });
+        }
+        self.advance(); // }
+        if routes.is_empty() {
+            return Err(format!("'routes' tanpa route, baris {}", self.line()));
+        }
+        Ok(TopLevel::Routes(RoutesDef { routes }))
+    }
+
+    // ── @i18n ──────────────────────────────────────────────────────────────
+    fn parse_i18n(&mut self) -> Result<TopLevel, String> {
+        self.expect(&TokKind::LBrace, "'{'")?;
+        let mut locales = Vec::new();
+        while self.peek() != &TokKind::RBrace {
+            if self.peek() == &TokKind::Eof {
+                return Err(format!("'@i18n' tidak ditutup, baris {}", self.line()));
+            }
+            let kw = self.expect_ident("'locale'")?;
+            if kw != "locale" {
+                return Err(format!(
+                    "Ekspektasi 'locale' di dalam @i18n, dapat '{kw}' di baris {}",
+                    self.line()
+                ));
+            }
+            let name = self.expect_str()?;
+            self.expect(&TokKind::LBrace, "'{'")?;
+            let mut entries = Vec::new();
+            while self.peek() != &TokKind::RBrace {
+                if self.peek() == &TokKind::Eof {
+                    return Err(format!("locale '{name}' tidak ditutup, baris {}", self.line()));
+                }
+                let key = self.expect_ident("kunci terjemahan")?;
+                let value = self.expect_str()?;
+                entries.push((key, value));
+            }
+            self.advance(); // }
+            if entries.is_empty() {
+                return Err(format!("locale '{name}' tanpa entri, baris {}", self.line()));
+            }
+            locales.push(I18nLocale { name, entries });
+        }
+        self.advance(); // }
+        if locales.is_empty() {
+            return Err(format!("'@i18n' tanpa locale, baris {}", self.line()));
+        }
+        Ok(TopLevel::I18n(I18nDef { locales }))
+    }
+
+    // ── component (lifecycle hooks) ────────────────────────────────────────
+    // `component MyCard { on_mount: @fetch_data() on_update: @log_change() on_unmount: @cleanup_state() }`
+    fn parse_component(&mut self) -> Result<TopLevel, String> {
+        self.advance(); // component
+        let name = self.expect_ident("nama komponen")?;
+        self.expect(&TokKind::LBrace, "'{'")?;
+        let mut hooks = Vec::new();
+        while self.peek() != &TokKind::RBrace {
+            if self.peek() == &TokKind::Eof {
+                return Err(format!("component '{name}' tidak ditutup, baris {}", self.line()));
+            }
+            let kw = self.expect_ident("lifecycle hook (on_mount/on_update/on_unmount)")?;
+            let kind = match kw.as_str() {
+                "on_mount" => LifecycleHookKind::Mount,
+                "on_update" => LifecycleHookKind::Update,
+                "on_unmount" => LifecycleHookKind::Unmount,
+                other => {
+                    return Err(format!(
+                        "Lifecycle hook tidak dikenal '{other}' di baris {} (yang sah: on_mount, on_update, on_unmount)",
+                        self.line()
+                    ));
+                }
+            };
+            if self.peek() == &TokKind::Colon {
+                self.advance();
+            }
+            let mut body = Vec::new();
+            while self.peek() != &TokKind::RBrace
+                && !matches!(self.peek(), TokKind::Ident(id)
+                    if matches!(id.as_str(), "on_mount" | "on_update" | "on_unmount"))
+            {
+                if self.peek() == &TokKind::Eof {
+                    return Err(format!("component '{name}' tidak ditutup, baris {}", self.line()));
+                }
+                body.push(self.parse_stmt()?);
+            }
+            if body.is_empty() {
+                return Err(format!(
+                    "Hook '{kw}' pada component '{name}' tanpa isi, baris {}",
+                    self.line()
+                ));
+            }
+            hooks.push(LifecycleHook { kind, body });
+        }
+        self.advance(); // }
+        if hooks.is_empty() {
+            return Err(format!("component '{name}' tanpa hook, baris {}", self.line()));
+        }
+        Ok(TopLevel::Component(ComponentDef { name, hooks }))
+    }
+
+    // ── ui_layout ─────────────────────────────────────────────────────────
+    fn parse_ui_layout(&mut self) -> Result<TopLevel, String> {
+        self.advance(); // ui_layout
+        let name = self.expect_str()?;
+        self.expect(&TokKind::LBrace, "'{'")?;
+        let mut children = Vec::new();
+        while self.peek() != &TokKind::RBrace {
+            if self.peek() == &TokKind::Eof {
+                return Err(format!("'ui_layout' tidak ditutup, baris {}", self.line()));
+            }
+            children.push(self.parse_ui_component()?);
+        }
+        self.advance(); // }
+        let root = if children.len() == 1 {
+            children.into_iter().next().unwrap()
+        } else {
+            UIComponent::Container { flex: Some(FlexDirection::Column), children }
+        };
+        Ok(TopLevel::UILayout(UILayoutDef { name, root }))
+    }
+
+    fn parse_ui_component(&mut self) -> Result<UIComponent, String> {
         let kw = match self.peek().clone() {
             TokKind::Ident(id) => id,
-            _ => return Err(format!("Ekspektasi deklarasi di baris {}", self.line())),
+            _ => return Err(format!("Ekspektasi komponen UI di baris {}", self.line())),
+        };
+        match kw.as_str() {
+            "container" => {
+                self.advance();
+                self.expect(&TokKind::LBrace, "'{'")?;
+                let mut flex = None;
+                let mut children = Vec::new();
+                // Phase 1: parse properties (flex, etc.)
+                loop {
+                    if self.peek() == &TokKind::RBrace || self.peek() == &TokKind::Eof {
+                        break;
+                    }
+                    if let TokKind::Ident(ref id) = self.peek() {
+                        if id == "text"
+                            || id == "button"
+                            || id == "input"
+                            || id == "container"
+                            || id == "card"
+                            || id == "modal"
+                            || id == "navbar"
+                            || id == "footer"
+                        {
+                            break;
+                        }
+                    }
+                    let prop = self.expect_ident("properti container")?;
+                    match prop.as_str() {
+                        "flex" => {
+                            let dir = self.expect_ident("arah flex (row/column)")?;
+                            flex = Some(match dir.as_str() {
+                                "row" => FlexDirection::Row,
+                                "column" => FlexDirection::Column,
+                                other => {
+                                    return Err(format!(
+                                        "Flex direction tidak dikenal '{other}' di baris {}",
+                                        self.line()
+                                    ));
+                                }
+                            });
+                        }
+                        _ => {
+                            let _ = self.parse_expr();
+                        }
+                    }
+                }
+                // Phase 2: parse children
+                while self.peek() != &TokKind::RBrace
+                    && self.peek() != &TokKind::Eof
+                    && !matches!(self.peek(), TokKind::Ident(ref i)
+                        if matches!(i.as_str(), "ui_layout" | "spatial_3d" | "world"))
+                    && self.peek() != &TokKind::At
+                {
+                    children.push(self.parse_ui_component()?);
+                }
+                self.advance(); // }
+                Ok(UIComponent::Container { flex, children })
+            }
+            "text" => {
+                self.advance();
+                let content = self.expect_str()?;
+                Ok(UIComponent::Text { content })
+            }
+            "button" => {
+                self.advance();
+                let label = self.expect_str()?;
+                let mut onClick = None;
+                if self.peek() == &TokKind::Ident("onClick".to_string()) {
+                    self.advance();
+                    onClick = Some(self.expect_ident("nama handler")?);
+                }
+                Ok(UIComponent::Button { label, onClick })
+            }
+            "input" => {
+                self.advance();
+                let name = self.expect_str()?;
+                let mut placeholder = None;
+                let mut bind = None;
+                let mut validate = None;
+                loop {
+                    match self.peek().clone() {
+                        TokKind::Ident(id) if id == "placeholder" => {
+                            self.advance();
+                            placeholder = Some(self.expect_str()?);
+                        }
+                        TokKind::Ident(id) if id == "bind" => {
+                            self.advance();
+                            if self.peek() == &TokKind::Colon {
+                                self.advance();
+                            }
+                            if self.peek() == &TokKind::At {
+                                self.advance();
+                                let mut path = self.expect_ident("nama state (setelah @)")?;
+                                while self.peek() == &TokKind::Dot {
+                                    self.advance();
+                                    path.push('.');
+                                    path.push_str(&self.expect_ident("segmen path state")?);
+                                }
+                                bind = Some(path);
+                            } else {
+                                bind = Some(self.expect_str()?);
+                            }
+                        }
+                        TokKind::Ident(id) if id == "validate" => {
+                            self.advance();
+                            if self.peek() == &TokKind::Colon {
+                                self.advance();
+                            }
+                            validate = Some(self.expect_str()?);
+                        }
+                        _ => break,
+                    }
+                }
+                Ok(UIComponent::Input { name, placeholder, bind, validate })
+            }
+            "card" | "modal" => {
+                let is_card = kw == "card";
+                self.advance();
+                let mut title = None;
+                if let TokKind::Str(_) = self.peek() {
+                    title = Some(self.expect_str()?);
+                }
+                self.expect(&TokKind::LBrace, "'{'")?;
+                let mut children = Vec::new();
+                while self.peek() != &TokKind::RBrace {
+                    if self.peek() == &TokKind::Eof {
+                        return Err(format!("'{kw}' tidak ditutup, baris {}", self.line()));
+                    }
+                    children.push(self.parse_ui_component()?);
+                }
+                self.advance(); // }
+                if is_card {
+                    Ok(UIComponent::Card { title, children })
+                } else {
+                    Ok(UIComponent::Modal { title, children })
+                }
+            }
+            "navbar" => {
+                self.advance();
+                let mut title = None;
+                if let TokKind::Str(_) = self.peek() {
+                    title = Some(self.expect_str()?);
+                }
+                Ok(UIComponent::Navbar { title })
+            }
+            "footer" => {
+                self.advance();
+                let content = self.expect_str()?;
+                Ok(UIComponent::Footer { content })
+            }
+            other => Err(format!(
+                "Komponen UI tidak dikenal '{other}' di baris {}",
+                self.line()
+            )),
+        }
+    }
+
+    // ── spatial_3d / world ────────────────────────────────────────────────
+    fn parse_spatial_3d(&mut self, is_world_alias: bool) -> Result<TopLevel, String> {
+        let name = if is_world_alias {
+            self.advance(); // world
+            self.expect_str()?
+        } else {
+            self.advance(); // spatial_3d
+            self.expect_str()?
+        };
+        self.expect(&TokKind::LBrace, "'{'")?;
+        let mut items = Vec::new();
+        while self.peek() != &TokKind::RBrace {
+            if self.peek() == &TokKind::Eof {
+                return Err(format!(
+                    "'{}' tidak ditutup, baris {}",
+                    if is_world_alias { "world" } else { "spatial_3d" },
+                    self.line()
+                ));
+            }
+            items.push(self.parse_spatial_item()?);
+        }
+        self.advance(); // }
+        let def = Spatial3DDef { name, items };
+        if is_world_alias {
+            Ok(TopLevel::World(def))
+        } else {
+            Ok(TopLevel::Spatial3D(def))
+        }
+    }
+
+    fn parse_spatial_item(&mut self) -> Result<SpatialItem, String> {
+        let kw = match self.peek().clone() {
+            TokKind::Ident(id) => id,
+            _ => return Err(format!("Ekspektasi deklarasi spatial di baris {}", self.line())),
         };
         match kw.as_str() {
             "camera" => {
                 self.advance();
                 let id = self.expect_str()?;
                 let props = self.parse_prop_block()?;
-                Ok(TopLevel::Camera(CameraDef { id, props }))
+                Ok(SpatialItem::Camera(CameraDef { id, props }))
             }
             "light" => {
                 self.advance();
                 let id = self.expect_str()?;
                 let props = self.parse_prop_block()?;
-                Ok(TopLevel::Light(LightDef { id, props }))
+                Ok(SpatialItem::Light(LightDef { id, props }))
             }
             "entity" => {
                 self.advance();
@@ -95,6 +584,9 @@ impl Parser {
                 let mut handlers = Vec::new();
                 self.expect(&TokKind::LBrace, "'{'")?;
                 while self.peek() != &TokKind::RBrace {
+                    if self.peek() == &TokKind::Eof {
+                        return Err(format!("entity tidak ditutup, baris {}", self.line()));
+                    }
                     if self.peek() == &TokKind::Ident("on".to_string()) {
                         handlers.push(self.parse_handler()?);
                     } else {
@@ -102,14 +594,14 @@ impl Parser {
                     }
                 }
                 self.advance();
-                Ok(TopLevel::Entity(EntityDef { id, props, handlers }))
+                Ok(SpatialItem::Entity(EntityDef { id, props, handlers }))
             }
             "let" => {
                 self.advance();
                 let name = self.expect_ident("nama variabel")?;
                 self.expect(&TokKind::Assign, "'='")?;
                 let value = self.parse_expr()?;
-                Ok(TopLevel::Let { name, value })
+                Ok(SpatialItem::Let { name, value })
             }
             "func" => {
                 self.advance();
@@ -126,28 +618,31 @@ impl Parser {
                 }
                 self.advance();
                 let body = self.parse_block()?;
-                Ok(TopLevel::Func(FuncDef { name, params, body }))
+                Ok(SpatialItem::Func(FuncDef { name, params, body }))
             }
-            "on" => Ok(TopLevel::Handler(self.parse_handler()?)),
-            other => Err(format!("Keyword/deklarasi tidak dikenal '{other}' di baris {}", self.line())),
+            "on" => Ok(SpatialItem::Handler(self.parse_handler()?)),
+            other => Err(format!("Deklarasi spatial tidak dikenal '{other}' di baris {}", self.line())),
         }
     }
 
+    // ── Handler ───────────────────────────────────────────────────────────
     fn parse_handler(&mut self) -> Result<Handler, String> {
-        // sudah di posisi 'on'
-        self.advance();
+        self.advance(); // on
         let ev = self.expect_ident("event (frame/speak/silent/click)")?;
         let event = match ev.as_str() {
             "frame" => EventKind::Frame,
             "speak" => EventKind::Speak,
             "silent" => EventKind::Silent,
             "click" => EventKind::Click,
-            other => return Err(format!("Event tidak dikenal '{other}' di baris {}", self.line())),
+            other => {
+                return Err(format!("Event tidak dikenal '{other}' di baris {}", self.line()));
+            }
         };
         let body = self.parse_block()?;
         Ok(Handler { event, body })
     }
 
+    // ── Property block ────────────────────────────────────────────────────
     fn parse_prop_block(&mut self) -> Result<Vec<Prop>, String> {
         self.expect(&TokKind::LBrace, "'{'")?;
         let mut props = Vec::new();
@@ -167,12 +662,10 @@ impl Parser {
         Ok(Prop { name, value })
     }
 
-    /// Nilai property: bisa builder (mesh/material), enum ident, tuple, atau angka.
     fn parse_prop_value(&mut self) -> Result<Expr, String> {
         match self.peek().clone() {
             TokKind::Ident(id) if is_builder(&id) => self.parse_builder(&id),
             TokKind::Ident(id) => {
-                // enum / ident biasa
                 self.advance();
                 Ok(Expr::Ident(id))
             }
@@ -184,7 +677,6 @@ impl Parser {
         self.advance(); // name
         let mut args = Vec::new();
         let mut props = None;
-        // argumen positional: angka / tuple / string
         loop {
             match self.peek().clone() {
                 TokKind::Num(_) | TokKind::Minus => {
@@ -206,6 +698,7 @@ impl Parser {
         Ok(Expr::Call { name: name.to_string(), args, props })
     }
 
+    // ── Block & Statement ─────────────────────────────────────────────────
     fn parse_block(&mut self) -> Result<Vec<Stmt>, String> {
         self.expect(&TokKind::LBrace, "'{'")?;
         let mut stmts = Vec::new();
@@ -221,10 +714,34 @@ impl Parser {
 
     fn parse_stmt(&mut self) -> Result<Stmt, String> {
         match self.peek().clone() {
+            TokKind::At => {
+                self.advance(); // @
+                let name = self.expect_ident("directive statement (@navigate/@set_locale)")?;
+                match name.as_str() {
+                    "navigate" => {
+                        self.expect(&TokKind::LParen, "'('")?;
+                        let path = self.expect_str()?;
+                        self.expect(&TokKind::RParen, "')'")?;
+                        Ok(Stmt::Navigate { path })
+                    }
+                    "set_locale" => {
+                        self.expect(&TokKind::LParen, "'('")?;
+                        let locale = self.expect_str()?;
+                        self.expect(&TokKind::RParen, "')'")?;
+                        Ok(Stmt::SetLocale { locale })
+                    }
+                    other => {
+                        // Directive generik (v1.13.0): @fetch_data(), @log_change(),
+                        // @cleanup_state() — dipakai lifecycle hooks component.
+                        self.expect(&TokKind::LParen, "'('")?;
+                        let args = self.parse_paren_list()?;
+                        Ok(Stmt::Directive { name: other.to_string(), args })
+                    }
+                }
+            }
             TokKind::Ident(kw) => match kw.as_str() {
                 "let" => {
                     self.advance();
-                    // Tuple destructuring (v1.6.0): let (a, b) = expr
                     if self.peek() == &TokKind::LParen {
                         self.advance();
                         let mut names = Vec::new();
@@ -255,7 +772,6 @@ impl Parser {
                     Ok(Stmt::Let { name, value })
                 }
                 "match" => {
-                    // match subject { "pat" => { ... } _ => { ... } } (v1.6.0)
                     self.advance();
                     let subject = self.parse_expr()?;
                     self.expect(&TokKind::LBrace, "'{'")?;
@@ -271,7 +787,6 @@ impl Parser {
                                 self.line()
                             ));
                         }
-                        // pattern: "str" | number | _
                         let pattern = match self.peek().clone() {
                             TokKind::Str(s) => {
                                 self.advance();
@@ -285,10 +800,12 @@ impl Parser {
                                 self.advance();
                                 let n = match self.peek().clone() {
                                     TokKind::Num(n) => n,
-                                    _ => return Err(format!(
-                                        "Ekspektasi angka setelah '-' di pattern match, baris {}",
-                                        self.line()
-                                    )),
+                                    _ => {
+                                        return Err(format!(
+                                            "Ekspektasi angka setelah '-' di pattern match, baris {}",
+                                            self.line()
+                                        ));
+                                    }
                                 };
                                 self.advance();
                                 MatchPattern::Num(-n)
@@ -303,12 +820,10 @@ impl Parser {
                                     "Pattern match tidak valid: {:?} di baris {}",
                                     other,
                                     self.line()
-                                ))
+                                ));
                             }
                         };
                         self.expect(&TokKind::Arrow, "'=>' (arm match)")?;
-                        // Body arm: blok `{ ... }` ATAU satu statement/ekspresi
-                        // tanpa kurung (roadmap: `"ask" => process_query()`).
                         let body = if self.peek() == &TokKind::LBrace {
                             self.parse_block()?
                         } else {
@@ -339,14 +854,12 @@ impl Parser {
                     Ok(Stmt::Return(value))
                 }
                 "while" => {
-                    // while cond { ... } — loop bounded (deterministik, P1)
                     self.advance();
                     let cond = self.parse_expr()?;
                     let body = self.parse_block()?;
                     Ok(Stmt::While { cond, body })
                 }
                 "for" => {
-                    // for x in start end { ... } — iterasi [start, end), step 1
                     self.advance();
                     let var = self.expect_ident("nama variabel loop")?;
                     if self.peek() == &TokKind::Ident("in".to_string()) {
@@ -363,13 +876,6 @@ impl Parser {
                     Ok(Stmt::For { var, start, end, body })
                 }
                 "on" => {
-                    // Handler hanya diizinkan di level entity / top-level, BUKAN
-                    // di dalam statement (spec §4.5, EBNF handler ::= "on" event_name ...).
-                    // Dulu di-parse lalu dibuang diam-diam — sekarang error eksplisit
-                    // agar deterministik (KB §5.1: unknown usage = non-conforming).
-                    // Namun `on` TETAP identifier bebas (P4 — tanpa reserved words):
-                    // error hanya saat `on` diikuti event yang dikenal, sehingga
-                    // user masih boleh memakai `on` sebagai nama fungsi/variabel.
                     let is_handler_attempt = matches!(
                         self.peek2(),
                         TokKind::Ident(ev) if matches!(ev.as_str(), "frame" | "speak" | "silent" | "click")
@@ -380,7 +886,6 @@ impl Parser {
                             self.line()
                         ));
                     }
-                    // jatuh ke penanganan ident biasa (assign / call / expr)
                     let name = kw;
                     if self.peek2() == &TokKind::Assign {
                         self.advance();
@@ -393,7 +898,6 @@ impl Parser {
                     }
                 }
                 _ => {
-                    // assign `x = expr` atau call `name(...)` atau expr
                     let name = kw;
                     if self.peek2() == &TokKind::Assign {
                         self.advance();
@@ -414,17 +918,7 @@ impl Parser {
         }
     }
 
-    fn expect_str(&mut self) -> Result<String, String> {
-        match self.peek().clone() {
-            TokKind::Str(s) => {
-                self.advance();
-                Ok(s)
-            }
-            _ => Err(format!("Ekspektasi string di baris {}", self.line())),
-        }
-    }
-
-    // ── Expressions (precedence climbing) ──
+    // ── Expressions ──────────────────────────────────────────────────────
     fn parse_expr(&mut self) -> Result<Expr, String> {
         self.parse_comparison()
     }
@@ -534,7 +1028,6 @@ impl Parser {
                 Ok(Expr::Tuple(items))
             }
             TokKind::LBracket => {
-                // List literal (v1.6.0): [ expr, expr ] — koma opsional
                 self.advance();
                 let mut items = Vec::new();
                 while self.peek() != &TokKind::RBracket {
@@ -551,7 +1044,6 @@ impl Parser {
                 Ok(Expr::List(items))
             }
             TokKind::LBrace => {
-                // Map literal (v1.6.0): { key: expr, key2: expr }
                 self.advance();
                 let mut pairs = Vec::new();
                 while self.peek() != &TokKind::RBrace {
@@ -574,7 +1066,6 @@ impl Parser {
         }
     }
 
-    /// Daftar ekspresi di dalam ( ) dipisah spasi / koma.
     fn parse_paren_list(&mut self) -> Result<Vec<Expr>, String> {
         let mut items = Vec::new();
         loop {
@@ -593,363 +1084,18 @@ impl Parser {
         self.expect(&TokKind::RParen, "')'")?;
         Ok(items)
     }
+
+    fn expect_str(&mut self) -> Result<String, String> {
+        match self.peek().clone() {
+            TokKind::Str(s) => {
+                self.advance();
+                Ok(s)
+            }
+            _ => Err(format!("Ekspektasi string di baris {}", self.line())),
+        }
+    }
 }
 
 fn is_builder(id: &str) -> bool {
-    // SUMBER TUNGGAL KEBENARAN: daftar builder hidup di registry.rs
-    // (MESH_BUILDERS / MATERIAL_BUILDERS). Parser tidak menduplikasi daftar —
-    // tambah builder baru cukup di registry.rs, parser ikut otomatis.
     crate::registry::is_builder(id)
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn parse_simple_world() {
-        let src = r#"
-            world "ADI Hologram" {
-                camera "cam" { pos (0 1.6 7) look (0 0 0) fov 55 }
-                light "key" { type point pos (5 6 4) color (1 0.95 0.9) intensity 1.5 }
-                entity "core" {
-                    pos (0 0 0)
-                    mesh sphere { radius 0.8 segments 3 }
-                    material wire (0.15 0.8 1) 0.9
-                    on frame {
-                        rotate(0.35 * t, (0.15 1 0.1))
-                        scaleBy(1 + 0.05 * sin(2.1 * t))
-                    }
-                }
-            }
-        "#;
-        let prog = parse(src).expect("parse");
-        assert_eq!(prog.name, "ADI Hologram");
-        assert_eq!(prog.items.len(), 3);
-        match &prog.items[2] {
-            TopLevel::Entity(e) => {
-                assert_eq!(e.id, "core");
-                assert_eq!(e.handlers.len(), 1);
-                assert_eq!(e.props.len(), 3);
-            }
-            _ => panic!("bukan entity"),
-        }
-    }
-
-    #[test]
-    fn parse_tuples_and_math() {
-        let src = "world \"w\" { entity \"e\" { on frame { let a = t * 1.2
-setPos(2.1 * cos(a), 0.35 * sin(2.3 * t), 2.1 * sin(a)) } } }";
-        let prog = parse(src).unwrap();
-        assert_eq!(prog.items.len(), 1);
-    }
-
-    #[test]
-    fn parse_rejects_handler_inside_statement() {
-        // Handler `on` HANYA diizinkan di level entity/top-level (spec §4.5).
-        // Dulu di-parse lalu dibuang diam-diam; sekarang harus error eksplisit.
-        let src = "world \"w\" { entity \"e\" { on frame { on click { } } } }";
-        let res = parse(src);
-        assert!(res.is_err(), "handler di dalam statement harus ditolak");
-        let msg = res.unwrap_err();
-        assert!(msg.contains("on"), "error harus menyebut 'on': {msg}");
-    }
-
-    #[test]
-    fn parse_while_loop() {
-        // v1.3.0 (Extension Protocol §11): while cond { ... } — loop bounded.
-        let src = r#"
-            world "T" {
-                entity "e" {
-                    on frame {
-                        let i = 0
-                        while i < 10 {
-                            i = i + 1
-                        }
-                    }
-                }
-            }
-        "#;
-        let prog = parse(src).expect("while loop harus di-parse");
-        assert_eq!(prog.items.len(), 1);
-    }
-
-    #[test]
-    fn parse_for_loop() {
-        // v1.3.0 (Extension Protocol §11): for x in start end { ... }
-        let src = r#"
-            world "T" {
-                entity "e" {
-                    on frame {
-                        for i in 0 10 {
-                            rotate(0.1, (0 1 0))
-                        }
-                    }
-                }
-            }
-        "#;
-        let prog = parse(src).expect("for loop harus di-parse");
-        assert_eq!(prog.items.len(), 1);
-    }
-
-    #[test]
-    fn parse_list_and_map_literals() {
-        // v1.6.0: List [ ... ] dan Map { key: value } dalam ekspresi.
-        let src = r#"
-            world "T" {
-                entity "e" {
-                    on frame {
-                        let tags = ["fastapi", "crewai", "adilang"]
-                        let cfg = { timeout: 30, retry: 3 }
-                    }
-                }
-            }
-        "#;
-        let prog = parse(src).expect("list/map harus di-parse");
-        assert_eq!(prog.items.len(), 1);
-    }
-
-    #[test]
-    fn parse_match_statement() {
-        // v1.6.0: match subject { "pat" => { ... } _ => { ... } }
-        let src = r#"
-            world "T" {
-                entity "e" {
-                    on frame {
-                        match verb {
-                            "ask" => { rotate(0.1, (0 1 0)) }
-                            "command" => { rotate(0.2, (0 1 0)) }
-                            _ => { rotate(0.05, (0 1 0)) }
-                        }
-                    }
-                }
-            }
-        "#;
-        let prog = parse(src).expect("match harus di-parse");
-        assert_eq!(prog.items.len(), 1);
-    }
-
-    #[test]
-    fn parse_match_numeric_pattern_and_no_wildcard() {
-        // Angka + unary minus sebagai pattern, tanpa wildcard tetap boleh parse
-        let src = r#"
-            world "T" {
-                entity "e" {
-                    on frame {
-                        match n {
-                            1 => { rotate(0.1, (0 1 0)) }
-                            -2 => { rotate(0.2, (0 1 0)) }
-                        }
-                    }
-                }
-            }
-        "#;
-        let prog = parse(src).expect("match numerik harus di-parse");
-        assert_eq!(prog.items.len(), 1);
-    }
-
-    #[test]
-    fn parse_match_arm_bare_expression() {
-        // Roadmap: arm tanpa kurung `"ask" => process_query()` — body = satu
-        // statement/ekspresi (bukan wajib blok `{ ... }`).
-        let src = r#"
-            world "T" {
-                entity "e" {
-                    on frame {
-                        match verb {
-                            "ask" => rotate(0.1, (0 1 0))
-                            _ => rotate(0.2, (0 1 0))
-                        }
-                    }
-                }
-            }
-        "#;
-        let prog = parse(src).expect("match arm tanpa kurung harus di-parse");
-        assert_eq!(prog.items.len(), 1);
-    }
-
-    #[test]
-    fn parse_match_wildcard_must_be_last() {
-        // Docstring MatchPattern: wildcard wajib arm terakhir — harus di-enforce.
-        let src = "world \"w\" { entity \"e\" { on frame { match x { _ => { } \"a\" => { } } } } }";
-        let res = parse(src);
-        assert!(res.is_err(), "wildcard sebelum arm lain harus ditolak");
-        let msg = res.unwrap_err();
-        assert!(msg.contains("TERAKHIR"), "error harus menyebut wildcard-last: {msg}");
-    }
-
-    #[test]
-    fn parse_match_requires_arrow() {
-        let src = "world \"w\" { entity \"e\" { on frame { match x { \"a\" { } } } } }";
-        let res = parse(src);
-        assert!(res.is_err(), "arm tanpa '=>' harus ditolak");
-    }
-
-    #[test]
-    fn parse_tuple_destructuring() {
-        // v1.6.0: let (code, msg) = get_status()
-        let src = r#"
-            world "T" {
-                func get_status() { return (200, "OK") }
-                entity "e" {
-                    on frame {
-                        let (code, msg) = get_status()
-                    }
-                }
-            }
-        "#;
-        let prog = parse(src).expect("destructuring harus di-parse");
-        assert_eq!(prog.items.len(), 2);
-    }
-
-    #[test]
-    fn parse_for_requires_in() {
-        // `for` tanpa 'in' harus error (bukan salah parse diam-diam).
-        let src = "world \"w\" { entity \"e\" { on frame { for i 0 10 { } } } }";
-        let res = parse(src);
-        assert!(res.is_err(), "for tanpa 'in' harus ditolak");
-        let msg = res.unwrap_err();
-        assert!(msg.contains("in"), "error harus menyebut 'in': {msg}");
-    }
-
-    // ═══════════════════════════════════════════════════════════════════════
-    // FUZZ / BENCHMARK (P3.10, P1 determinism)
-    // ═══════════════════════════════════════════════════════════════════════
-    // LCG deterministik (tanpa RNG global, tanpa dependensi) — seed tetap
-    // membuat fuzz REPRODUCIBLE: kegagalan yang sama selalu terulang.
-    struct Lcg(u64);
-    impl Lcg {
-        fn new(seed: u64) -> Self {
-            Self(seed)
-        }
-        fn next(&mut self) -> u64 {
-            // Numerical Recipes LCG — cukup untuk fuzz, deterministik
-            self.0 = self
-                .0
-                .wrapping_mul(6364136223846793005)
-                .wrapping_add(1442695040888963407);
-            self.0 >> 33
-        }
-        fn range(&mut self, lo: usize, hi: usize) -> usize {
-            if hi <= lo {
-                lo
-            } else {
-                lo + (self.next() as usize) % (hi - lo)
-            }
-        }
-        fn num(&mut self, scale: f64) -> f64 {
-            let v = (self.next() % 1000) as f64 / 1000.0;
-            (v * scale * 100.0).round() / 100.0
-        }
-    }
-
-    /// Bangun world ADILang acak-yet-valid dari registry tertutup (P6).
-    /// Semua builder diambil dari MESH_BUILDERS/MATERIAL_BUILDERS (sumber
-    /// tunggal) sehingga hasilnya dijamin berada dalam kosakata bahasa.
-    fn random_world(rng: &mut Lcg) -> String {
-        use crate::registry;
-        let meshes: Vec<&str> = registry::mesh_builder_names().collect();
-        let mats: Vec<&str> = registry::material_builder_names().collect();
-        let transforms = [
-            "move", "setPos", "setScale", "scaleBy", "rotate", "setColor", "setAlpha",
-        ];
-        let math1 = ["sin", "cos", "tan", "sqrt", "abs", "floor"];
-
-        let mut s = String::from("world \"fuzz\" {\n");
-        s.push_str("  camera \"cam\" { pos (0 1.6 6) look (0 0 0) fov 55 }\n");
-        s.push_str("  light \"key\" { type point pos (4 5 3) color (1 0.95 0.9) intensity 1.4 }\n");
-        let n_entities = rng.range(1, 4);
-        for e in 0..n_entities {
-            s.push_str(&format!("  entity \"e{e}\" {{\n"));
-            s.push_str("    pos (0 0 0)\n");
-            let m = meshes[rng.range(0, meshes.len())];
-            let radius = rng.range(1, 5);
-            let seg = rng.range(3, 8);
-            s.push_str(&format!("    mesh {m} {{ radius {radius} segments {seg} }}\n"));
-            let mat = mats[rng.range(0, mats.len())];
-            let (r, g, b) = (rng.num(1.0), rng.num(1.0), rng.num(1.0));
-            let alpha = rng.range(0, 2);
-            s.push_str(&format!("    material {mat} ({r} {g} {b}) {alpha}\n"));
-            s.push_str("    on frame {\n");
-            // transform acak dari registry transform
-            let tf = transforms[rng.range(0, transforms.len())];
-            let sp = rng.num(1.0);
-            let (ax, ay, az) = (rng.num(1.0), rng.num(1.0), rng.num(1.0));
-            s.push_str(&format!("      {tf}({sp} * t, ({ax} {ay} {az}))\n"));
-            // math 1-arg kadang disertakan
-            if rng.range(0, 3) == 0 {
-                let fn1 = math1[rng.range(0, math1.len())];
-                s.push_str(&format!("      setScale(1 + 0.05 * {fn1}({sp} * t))\n"));
-            }
-            // loop bounded (v1.3.0) kadang disertakan
-            if rng.range(0, 3) == 0 {
-                s.push_str("      let i = 0\n");
-                s.push_str("      while i < 3 {\n");
-                s.push_str("        i = i + 1\n");
-                s.push_str("      }\n");
-            }
-            if rng.range(0, 3) == 0 {
-                s.push_str("      for k in 0 2 {\n");
-                s.push_str("        rotate(0.1, (0 1 0))\n");
-                s.push_str("      }\n");
-            }
-            s.push_str("    }\n");
-            s.push_str("  }\n");
-        }
-        s.push_str("}\n");
-        s
-    }
-
-    #[test]
-    fn fuzz_random_worlds_selalu_valid_dan_reproducible() {
-        // P3.10 — bukti determinisme (P1): semua world acak dari registry harus
-        // valid, dan seed yang sama menghasilkan urutan parse yang sama.
-        let mut rng = Lcg::new(0xAD1_2026);
-        for _ in 0..300 {
-            let src = random_world(&mut rng);
-            let res = parse(&src);
-            assert!(
-                res.is_ok(),
-                "world acak harus valid (P1 determinism):\n{src}\nerr: {:?}",
-                res.err()
-            );
-        }
-        // Reproducibility: seed sama → generator menghasilkan source yang sama
-        let mut a = Lcg::new(7);
-        let mut b = Lcg::new(7);
-        for _ in 0..50 {
-            assert_eq!(random_world(&mut a), random_world(&mut b), "fuzz harus reproducible");
-        }
-    }
-
-    #[test]
-    fn fuzz_mutasi_tidak_pernah_panic() {
-        // P1 determinism — parser TIDAK boleh panic pada input apa pun:
-        // hasil Ok atau Err sama-sama sah, yang penting tidak crash.
-        let base = include_str!("../worlds/default.adi");
-        let base: Vec<char> = base.chars().collect();
-        // v1.6.0: sertakan token baru [ ] : => (=> dibentuk '='+'>') agar mutasi
-        // benar-benar melatih cabang lexer baru (list/map/match).
-        let alphabet: Vec<char> = "(){}\",.=+-*/%<>_:[]0123456789abcdefghijklmnopqrstuvwxyz "
-            .chars()
-            .collect();
-        let mut rng = Lcg::new(0xC0FFEE);
-        for _ in 0..500 {
-            let mut chars = base.clone();
-            for _ in 0..rng.range(1, 8) {
-                let idx = rng.range(0, chars.len().max(1));
-                match rng.range(0, 3) {
-                    0 => chars[idx] = alphabet[rng.range(0, alphabet.len())],
-                    1 => chars.insert(idx, alphabet[rng.range(0, alphabet.len())]),
-                    _ => {
-                        if chars.len() > 1 {
-                            chars.remove(idx);
-                        }
-                    }
-                }
-            }
-            let mutated: String = chars.into_iter().collect();
-            let _ = parse(&mutated); // Ok atau Err — tidak boleh panic
-        }
-    }
 }

@@ -28,7 +28,7 @@ pub enum LightKind {
     Ambient,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct MeshParams {
     pub radius: f64,
     pub tube: f64,
@@ -44,7 +44,7 @@ impl Default for MeshParams {
     }
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct Transform {
     pub pos: [f64; 3],
     pub rot: [f64; 3],

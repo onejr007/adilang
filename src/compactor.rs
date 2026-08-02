@@ -105,6 +105,43 @@ fn collect_bindings(item: &TopLevel, r: &mut Renamer) {
                 collect_stmt_bindings(s, r);
             }
         }
+        TopLevel::World(s) | TopLevel::Spatial3D(s) => {
+            for si in &s.items {
+                match si {
+                    crate::ast::SpatialItem::Func(f) => {
+                        r.note(&f.name);
+                        for p in &f.params {
+                            r.note(p);
+                        }
+                        for s in &f.body {
+                            collect_stmt_bindings(s, r);
+                        }
+                    }
+                    crate::ast::SpatialItem::Let { name, .. } => r.note(name),
+                    crate::ast::SpatialItem::Entity(e) => {
+                        for h in &e.handlers {
+                            for s in &h.body {
+                                collect_stmt_bindings(s, r);
+                            }
+                        }
+                    }
+                    crate::ast::SpatialItem::Handler(h) => {
+                        for s in &h.body {
+                            collect_stmt_bindings(s, r);
+                        }
+                    }
+                    _ => {}
+                }
+            }
+        }
+        TopLevel::Payload(_) | TopLevel::UILayout(_) => {}
+        TopLevel::Component(c) => {
+            for h in &c.hooks {
+                for s in &h.body {
+                    collect_stmt_bindings(s, r);
+                }
+            }
+        }
         _ => {}
     }
 }
@@ -257,6 +294,12 @@ fn rewrite_stmt(s: &mut Stmt, r: &Renamer) {
                 }
             }
         }
+        Stmt::Navigate { .. } | Stmt::SetLocale { .. } => {}
+        Stmt::Directive { args, .. } => {
+            for a in args {
+                rewrite_expr(a, r);
+            }
+        }
     }
 }
 
@@ -306,6 +349,65 @@ fn rewrite_top_level(item: &mut TopLevel, r: &Renamer) {
                 rewrite_stmt(s, r);
             }
         }
+        TopLevel::World(s) | TopLevel::Spatial3D(s) => {
+            for si in &mut s.items {
+                match si {
+                    SpatialItem::Camera(c) => {
+                        for p in &mut c.props {
+                            rewrite_expr(&mut p.value, r);
+                        }
+                    }
+                    SpatialItem::Light(l) => {
+                        for p in &mut l.props {
+                            rewrite_expr(&mut p.value, r);
+                        }
+                    }
+                    SpatialItem::Entity(e) => {
+                        for p in &mut e.props {
+                            rewrite_expr(&mut p.value, r);
+                        }
+                        for h in &mut e.handlers {
+                            for s in &mut h.body {
+                                rewrite_stmt(s, r);
+                            }
+                        }
+                    }
+                    SpatialItem::Let { name, value } => {
+                        if let Some(short) = r.get(name) {
+                            *name = short.to_string();
+                        }
+                        rewrite_expr(value, r);
+                    }
+                    SpatialItem::Func(f) => {
+                        if let Some(short) = r.get(&f.name) {
+                            f.name = short.to_string();
+                        }
+                        for p in f.params.iter_mut() {
+                            if let Some(short) = r.get(p) {
+                                *p = short.to_string();
+                            }
+                        }
+                        for s in &mut f.body {
+                            rewrite_stmt(s, r);
+                        }
+                    }
+                    SpatialItem::Handler(h) => {
+                        for s in &mut h.body {
+                            rewrite_stmt(s, r);
+                        }
+                    }
+                }
+            }
+        }
+        TopLevel::Payload(_) | TopLevel::UILayout(_) => {}
+        TopLevel::Component(c) => {
+            for h in &mut c.hooks {
+                for s in &mut h.body {
+                    rewrite_stmt(s, r);
+                }
+            }
+        }
+        _ => {}
     }
 }
 
@@ -498,6 +600,16 @@ fn render_stmt(s: &Stmt) -> String {
             out.push('}');
             out
         }
+        Stmt::Navigate { path } => format!("@navigate({})", q(path)),
+        Stmt::SetLocale { locale } => format!("@set_locale({})", q(locale)),
+        Stmt::Directive { name, args } => {
+            let arg_s = args
+                .iter()
+                .map(render_expr)
+                .collect::<Vec<_>>()
+                .join(", ");
+            format!("@{name}({arg_s})")
+        }
     }
 }
 
@@ -522,7 +634,11 @@ fn render_props(props: &[Prop]) -> String {
     }
 }
 
-fn render_top_level(item: &TopLevel) -> String {
+fn render_prop(p: &Prop) -> String {
+    format!("{} {}", p.name, render_expr(&p.value))
+}
+
+pub(crate) fn render_top_level(item: &TopLevel) -> String {
     match item {
         TopLevel::Camera(c) => format!("camera {} {}", q(&c.id), render_props(&c.props)),
         TopLevel::Light(l) => format!("light {} {}", q(&l.id), render_props(&l.props)),
@@ -549,6 +665,204 @@ fn render_top_level(item: &TopLevel) -> String {
             )
         }
         TopLevel::Handler(h) => render_handler(h),
+        TopLevel::Payload(p) => render_payload(p),
+        TopLevel::UILayout(u) => render_ui_layout(u),
+        TopLevel::Spatial3D(s) => render_spatial_3d(s, false),
+        TopLevel::World(s) => render_spatial_3d(s, true),
+        TopLevel::UseJs(u) => format!("@use_js {{\n    url {}\n}}", q(&u.url)),
+        TopLevel::Routes(r) => {
+            let mut out = String::from("routes {\n");
+            for route in &r.routes {
+                out.push_str(&format!("    route {} layout {}", q(&route.path), q(&route.layout)));
+                if let Some(t) = &route.transition {
+                    out.push_str(&format!(" transition {}", q(t)));
+                }
+                out.push('\n');
+            }
+            out.push('}');
+            out
+        }
+        TopLevel::I18n(i) => {
+            let mut out = String::from("@i18n {\n");
+            for loc in &i.locales {
+                out.push_str(&format!("    locale {} {{\n", q(&loc.name)));
+                for (k, v) in &loc.entries {
+                    out.push_str(&format!("        {} {}\n", k, q(v)));
+                }
+                out.push_str("    }\n");
+            }
+            out.push('}');
+            out
+        }
+        TopLevel::Component(c) => {
+            let mut out = format!("component {} {{\n", c.name);
+            for h in &c.hooks {
+                out.push_str(&format!("    {}: {}\n", h.kind.as_str(), render_stmts(&h.body)));
+            }
+            out.push('}');
+            out
+        }
+    }
+}
+
+fn render_payload(p: &PayloadDef) -> String {
+    let mut out = String::from("@payload {\n");
+    out.push_str(&format!("    sender {}\n", q(&p.sender)));
+    out.push_str(&format!("    target_agent {}\n", q(&p.target_agent)));
+    out.push_str(&format!("    intent {}\n", q(&p.intent)));
+    if let Some(state) = &p.state_data {
+        out.push_str(&format!("    state_data {}\n", render_expr(state)));
+    }
+    out.push('}');
+    out
+}
+
+fn render_ui_layout(u: &UILayoutDef) -> String {
+    let mut out = String::from("ui_layout ");
+    out.push_str(&q(&u.name));
+    out.push_str(" {\n");
+    out.push_str(&render_ui_component(&u.root, 1));
+    out.push('}');
+    out
+}
+
+fn render_ui_component(comp: &UIComponent, indent: usize) -> String {
+    let pad = "    ".repeat(indent);
+    match comp {
+        UIComponent::Container { flex, children } => {
+            let mut out = String::new();
+            out.push_str(&pad);
+            out.push_str("container {\n");
+            if let Some(f) = flex {
+                out.push_str(&format!("{}    flex {}\n", pad, match f { FlexDirection::Row => "row", FlexDirection::Column => "column" }));
+            }
+            for child in children {
+                out.push_str(&render_ui_component(child, indent + 1));
+            }
+            out.push_str(&pad);
+            out.push_str("}\n");
+            out
+        }
+        UIComponent::Text { content } => {
+            format!("{pad}text {}\n", q(content))
+        }
+        UIComponent::Button { label, onClick } => {
+            let mut out = format!("{pad}button {}", q(label));
+            if let Some(h) = onClick {
+                // handler = identifier (parser: expect_ident) — JANGAN di-quote
+                out.push_str(&format!(" onClick {}\n", h));
+            } else {
+                out.push('\n');
+            }
+            out
+        }
+        UIComponent::Input { name, placeholder, bind, validate } => {
+            let mut out = format!("{pad}input {}", q(name));
+            if let Some(p) = placeholder {
+                out.push_str(&format!(" placeholder {}", q(p)));
+            }
+            if let Some(b) = bind {
+                out.push_str(&format!(" bind @{}", b));
+            }
+            if let Some(v) = validate {
+                out.push_str(&format!(" validate {}", q(v)));
+            }
+            out.push('\n');
+            out
+        }
+        UIComponent::Card { title, children } => {
+            let mut out = String::new();
+            out.push_str(&pad);
+            out.push_str("card");
+            if let Some(t) = title {
+                out.push(' ');
+                out.push_str(&q(t));
+            }
+            out.push_str(" {\n");
+            for child in children {
+                out.push_str(&render_ui_component(child, indent + 1));
+            }
+            out.push_str(&pad);
+            out.push_str("}\n");
+            out
+        }
+        UIComponent::Modal { title, children } => {
+            let mut out = String::new();
+            out.push_str(&pad);
+            out.push_str("modal");
+            if let Some(t) = title {
+                out.push(' ');
+                out.push_str(&q(t));
+            }
+            out.push_str(" {\n");
+            for child in children {
+                out.push_str(&render_ui_component(child, indent + 1));
+            }
+            out.push_str(&pad);
+            out.push_str("}\n");
+            out
+        }
+        UIComponent::Navbar { title } => {
+            let mut out = format!("{pad}navbar");
+            if let Some(t) = title {
+                out.push(' ');
+                out.push_str(&q(t));
+            }
+            out.push('\n');
+            out
+        }
+        UIComponent::Footer { content } => {
+            format!("{pad}footer {}\n", q(content))
+        }
+    }
+}
+
+fn render_spatial_3d(s: &Spatial3DDef, is_world: bool) -> String {
+    let mut out = String::new();
+    if is_world {
+        out.push_str(&format!("world {} {{\n", q(&s.name)));
+    } else {
+        out.push_str(&format!("spatial_3d {} {{\n", q(&s.name)));
+    }
+    for item in &s.items {
+        out.push_str(&render_spatial_item(item));
+    }
+    out.push('}');
+    out
+}
+
+fn render_spatial_item(item: &SpatialItem) -> String {
+    match item {
+        SpatialItem::Camera(c) => {
+            format!("    camera {} {}\n", q(&c.id), render_props(&c.props))
+        }
+        SpatialItem::Light(l) => {
+            format!("    light {} {}\n", q(&l.id), render_props(&l.props))
+        }
+        SpatialItem::Entity(e) => {
+            let mut out = String::new();
+            out.push_str(&format!("    entity {} {{\n", q(&e.id)));
+            for p in &e.props {
+                out.push_str(&format!("        {}\n", render_prop(p)));
+            }
+            for h in &e.handlers {
+                out.push_str(&render_handler(h));
+            }
+            out.push_str("    }\n");
+            out
+        }
+        SpatialItem::Let { name, value } => {
+            format!("    let {} = {}\n", name, render_expr(value))
+        }
+        SpatialItem::Func(f) => {
+            format!(
+                "    func {}({}) {{\n{}}}\n",
+                f.name,
+                f.params.join(" "),
+                render_stmts(&f.body)
+            )
+        }
+        SpatialItem::Handler(h) => render_handler(h),
     }
 }
 
@@ -563,12 +877,11 @@ fn render_handler(h: &Handler) -> String {
 }
 
 pub fn render_program(p: &Program) -> String {
-    let mut out = format!("world {} {{", q(&p.name));
+    let mut out = String::new();
     for item in &p.items {
-        out.push('\n');
         out.push_str(&render_top_level(item));
+        out.push('\n');
     }
-    out.push('}');
     out
 }
 

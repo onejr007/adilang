@@ -1,0 +1,30 @@
+@payload {
+    sender "local"
+    target_agent "web"
+    intent "boot"
+}
+
+routes {
+    route "/" layout "home" transition "fade"
+}
+
+@i18n {
+    locale "en" { welcome "Welcome" cta "Open" }
+    locale "id" { welcome "Selamat datang" cta "Buka" }
+}
+
+ui_layout "home" {
+    container {
+        text "Hello ADILang"
+        text "welcome"
+        button "cta" onClick go
+    }
+}
+
+component App {
+    on_mount: @log_change("app_mounted")
+}
+
+func go() {
+    @log_change("go")
+}

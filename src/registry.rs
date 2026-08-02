@@ -12,7 +12,7 @@ use crate::scene::{MaterialKind, MeshKind};
 /// Versi kanonik bahasa ADILang — sumber tunggal kebenaran untuk versi.
 /// Sinkron dengan: Cargo.toml, docs/LANGUAGE.md, docs/adilang.ebnf,
 /// docs/ADILANG_KNOWLEDGE.md, dan core/adilang_protocol.py (backend ADI).
-pub const VERSION: &str = "1.9.0";
+pub const VERSION: &str = "1.14.0";
 
 // ── SUMBER TUNGGAL KEBENARAN untuk builder mesh/material ────────────────────
 // Dipakai oleh: parser.rs `is_builder()`, eval.rs `apply_mesh()/apply_material()`,
@@ -102,6 +102,9 @@ pub fn registry_text() -> String {
             "math1: sin cos tan asin acos atan sqrt abs floor ceil round\n",
             "math2: pow min max\n",
             "math3: clamp lerp\n",
+            // v1.12.0 — builtin i18n translate t(kunci) (bukan math; diklasifikasi
+            // khusus oleh scripts/check_adilang_registry.py dari call_builtin).
+            "i18n: t\n",
             "ident: t mouseX mouseY PI\n",
             "meshparam: radius tube inner segments size count\n",
             "cameraprop: pos look fov\n",
@@ -113,7 +116,7 @@ pub fn registry_text() -> String {
             "lightprop.type: point ambient\n",
             "entityprop: pos rot scale mesh material\n",
             "lightkind: point ambient\n",
-            "declaration: world camera light entity let func on\n",
+            "declaration: world camera light entity let func on ui_layout spatial_3d routes payload use_js i18n url sender target_agent intent state_data container flex row column text button input card navbar footer component\n",
             "statement: let if return while for match\n",
             "keyword: true false\n",
             "operator: + - * / % == != < > <= >= = =>\n",
@@ -123,13 +126,72 @@ pub fn registry_text() -> String {
             "verb: ask inform command greet system\n",
             // ADILang Binary/Bytecode (v1.4.0) — API transport real-time
             // (bit-packing + delta, Rust → WASM → WebSocket antar-client).
-            "binary: encode_full decode_full encode_delta apply_delta packet_kind packet_version packet_entity_count binary_spec\n",
+            "binary: encode_program decode_program encode_full decode_full encode_delta apply_delta packet_kind packet_version packet_entity_count binary_spec\n",
+            // ADILang Protocol (v1.10.0) — text transport Base64 (adilang_protocol.rs).
+            "protocol_rs: b64_encode b64_decode encode_source_to_binary encode_source_to_b64 encode_ast_to_b64 decode_b64_to_ast decode_b64_to_binary size_report\n",
             // ADILang Tooling (v1.7.0) — linter & token compactor. Sumber
             // aktual: pub fn di checker.rs / compactor.rs + def di
             // core/adilang_protocol.py (diverifikasi scripts/check_adilang_registry.py).
             "checker: check_src\n",
             "compactor: optimize_src render_expr render_program\n",
             "selfheal: syntax_error_event auto_fix check_adilang\n",
+            // ADILang Spatial (v1.11.0) — procedural 3D + spatial UI rasterizer
+            // (adilang_spatial.rs). Generate mesh tanpa aset eksternal + render
+            // ui_layout ke tekstur RGBA untuk dipetakan ke permukaan objek.
+            "spatial: generate_shape generate_all render_layout_to_texture\n",
+            // ADILang CRDT (v1.11.0) — multi-agent collaborative state
+            // (adilang_crdt.rs). Register CRDT per path sel AST; merge konvergen
+            // & delta transfer antar-agen. Cermin pub fn crdt.rs.
+            "crdt: new paths get get_value live_count max_lamport total_count make_set make_delete apply conflicts merge snapshot_json snapshot_string load_snapshot_json load_snapshot_string missing_ops is_tombstone join_path\n",
+            // ADILang Diff/Patch (v1.11.0) — diffing & patching level-blok AST
+            // (adilang_diff.rs). LLM menghasilkan 'ADILang Patch Script' yang
+            // hanya mengubah blok yang diminta — tanpa compile ulang dokumen.
+            "diff: block_key diff_docs diff_docs_json apply_doc apply_doc_json parse_patch_script parse_patch_script_json apply_patch_script\n",
+            // ADILang Analytics/Telemetry (v1.11.0) — metrik runtime deterministik
+            // (adilang_analytics.rs): FPS window, durasi render, hitungan event.
+            "analytics: new reset record_frame record_load record_speak record_silent record_action record_state_set record_error frame_rate avg_frame_ms avg_render_ms min_frame_ms max_frame_ms snapshot_json frames loads errors\n",
+            // ADILang Render Target (v1.11.0) — abstraksi rendering layer
+            // cross-platform (adilang_target.rs): seleksi backend WebGL2/
+            // WebGPU/wgpu-native secara deterministik per kapabilitas.
+            "target: default_caps select_backend\n",
+            // ADILang Package Manager (v1.12.0) — adipm (adilang_pkg.rs):
+            // manifest `adi.toml` + CLI `adi add/install`. Cermin pub fn pkg.rs.
+            "pkg: parse_manifest render_manifest add_dependency remove_dependency has_dependency\n",
+            // ADILang Headless Tester (v1.12.0) — `adi test` (adilang_tester.rs):
+            // uji parse/check/struktur/simulasi event tanpa browser.
+            "tester: test_program\n",
+            // ADILang Build Exporter (v1.12.0) — `adilang-build --target gh-pages`
+            // (adilang_exporter.rs): situs statis + PWA (manifest.json/sw.js).
+            "exporter: export_gh_pages\n",
+            // ADILang Lifecycle Hooks (v1.13.0) — komponen `component Name {
+            // on_mount: @fetch_data() ... }` (ast.rs LifecycleHookKind.as_str()).
+            "lifecycle: on_mount on_update on_unmount\n",
+            // ADILang CLI Scaffolder (v1.13.0) — `adi new` (adilang_scaffolder.rs):
+            // template minimal/spatial-3d/fullstack-agent. Cermin pub fn scaffolder.rs.
+            "scaffolder: template_source validate_template scaffold\n",
+            // ADILang DevServer+HMR (v1.13.0) — `adi dev` (adilang_devserver.rs):
+            // server HTTP statis + WebSocket HMR (frame HMR_CONNECT/HMR_RELOAD).
+            "devserver: serve HMR_CONNECT HMR_RELOAD WS_PATH\n",
+            // ADILang Build Optimizer (v1.13.0) — `adi build` (adilang_build.rs):
+            // gabung + DCE (compact + .adib) + ekspor gh-pages + PWA + wasm-opt.
+            "build: build_project savings_percent\n",
+            // ADILang Dense Compact AST (v1.14.0) — opcode map & bitstream
+            // (adilang_dense.rs): UI 2D / layout / mesh WebGL 3D sebagai opcode
+            // satu-byte; laporan penghematan >80% vs HTML/JS/JSON. Cermin pub fn dense.rs.
+            "dense: dense_spec opcode_name opcode_of_ui opcode_of_mesh mesh_name material_name light_name encode_program decode_program opcode_histogram json_equivalent html_equivalent savings_percent size_report\n",
+            // ADILang AI Guard (v1.14.0) — validator & handshake mesin
+            // (adilang_ai_guard.rs): dokumen yang diedit manusia gagal verifikasi.
+            "ai_guard: fnv1a64 canonical_bytes signature_hex sign attach_signature extract_signature verify machine_entropy is_machine_generated challenge respond verify_handshake\n",
+            // ADILang Diagnostics (v1.14.0) — protokol error mesin AI-ke-AI
+            // (adilang_diagnostics.rs): pasangan {err: 0x0E4, node: 12}, bukan
+            // string pesan manusia.
+            "diagnostics: code_name classify machine_error error_vector node_from_line from_checker from_result diagnostics_report\n",
+            // ADILang Machine Runner (v1.14.0) — interpreter bitstream langsung
+            // (adilang_machine_runner.rs): decode → evaluasi → operasi DOM/WebGL2.
+            "machine: from_dense from_source program dense_bytes run_lifecycle fire_event run_frame dom_ops_json webgl_ops_json components_json spec\n",
+            // ADILang WASM API (v1.10.0) — exports wasm-bindgen (wasm_api.rs)
+            // untuk Web SDK adilang_web.js.
+            "wasm: adilang_start adilang_load adilang_speak adilang_silent adilang_check adilang_check_diagnostics adilang_optimize adilang_debug_count adilang_version adilang_registry adilang_binary_encode_full adilang_binary_encode_delta adilang_binary_decode_full adilang_binary_spec adilang_parse_and_render adilang_export_agent_payload adilang_update_state adilang_get_state adilang_protocol_encode_source_to_b64 adilang_protocol_decode_b64_to_ast adilang_protocol_size_report adilang_schema_json adilang_schema_prompt adilang_schema_prompt_compact adilang_state_set_json adilang_state_get adilang_state_snapshot adilang_state_revision adilang_state_incr adilang_state_is_render_relevant adilang_spatial_generate adilang_spatial_shapes adilang_spatial_ui_texture adilang_crdt_set adilang_crdt_delete adilang_crdt_get adilang_crdt_snapshot adilang_crdt_load_snapshot adilang_crdt_merge adilang_crdt_count adilang_crdt_missing_ops adilang_patch_info adilang_diff adilang_apply_patch adilang_parse_patch_script adilang_apply_patch_script adilang_analytics_record_frame adilang_analytics_record_event adilang_analytics_snapshot adilang_analytics_reset adilang_capture_viewport_snapshot adilang_target_info adilang_target_select adilang_test_report adilang_parse_components adilang_run_lifecycle adilang_dense_spec adilang_dense_size_report adilang_ai_guard_sign adilang_ai_guard_verify adilang_diag_payload adilang_machine_run_lifecycle adilang_machine_dom_ops adilang_machine_webgl_ops adilang_machine_fire_event adilang_machine_components\n",
         )
     )
 }
@@ -195,6 +257,51 @@ mod tests {
     }
 
     #[test]
+    fn registry_meliputi_protocol_rs_api() {
+        let r = registry_text();
+        for kw in [
+            "b64_encode",
+            "b64_decode",
+            "encode_source_to_b64",
+            "decode_b64_to_ast",
+            "size_report",
+        ] {
+            assert!(r.contains(kw), "registry harus memuat protocol_rs API '{kw}'");
+        }
+        assert!(r.contains("protocol_rs:"), "registry harus memuat kategori protocol_rs");
+    }
+
+    #[test]
+    fn registry_meliputi_wasm_api() {
+        let r = registry_text();
+        for kw in [
+            "adilang_start",
+            "adilang_parse_and_render",
+            "adilang_protocol_encode_source_to_b64",
+            "adilang_schema_json",
+            "adilang_state_set_json",
+            "adilang_state_revision",
+            "adilang_get_state",
+        ] {
+            assert!(r.contains(kw), "registry harus memuat wasm API '{kw}'");
+        }
+        assert!(r.contains("wasm:"), "registry harus memuat kategori wasm");
+    }
+
+    #[test]
+    fn registry_meliputi_spatial_api() {
+        let r = registry_text();
+        for kw in ["generate_shape", "render_layout_to_texture", "torus", "grid"] {
+            assert!(r.contains(kw), "registry harus memuat spatial API '{kw}'");
+        }
+        assert!(r.contains("spatial:"), "registry harus memuat kategori spatial");
+        // Export WASM spatial ikut tercantum
+        for kw in ["adilang_spatial_generate", "adilang_spatial_shapes", "adilang_spatial_ui_texture"] {
+            assert!(r.contains(kw), "registry harus memuat wasm spatial '{kw}'");
+        }
+    }
+
+    #[test]
     fn registry_meliputi_props_deklarasi_dan_simbol() {
         let r = registry_text();
         // Entity props (konsisten dengan eval.rs apply_entity_prop)
@@ -227,6 +334,125 @@ mod tests {
             "protocolkey harus memuat 'world' (reply.world)"
         );
         assert!(!pk_line.is_empty(), "baris protocolkey harus ada di registry");
+    }
+
+    #[test]
+    fn registry_meliputi_diff_api() {
+        let r = registry_text();
+        for kw in ["diff_docs", "apply_doc", "parse_patch_script", "apply_patch_script"] {
+            assert!(r.contains(kw), "registry harus memuat diff API '{kw}'");
+        }
+        assert!(r.contains("diff:"), "registry harus memuat kategori diff");
+        // Export WASM diff ikut tercantum
+        for kw in [
+            "adilang_diff",
+            "adilang_apply_patch",
+            "adilang_parse_patch_script",
+            "adilang_apply_patch_script",
+        ] {
+            assert!(r.contains(kw), "registry harus memuat wasm diff '{kw}'");
+        }
+    }
+
+    #[test]
+    fn registry_meliputi_analytics_api() {
+        let r = registry_text();
+        for kw in [
+            "record_frame",
+            "record_load",
+            "frame_rate",
+            "avg_render_ms",
+            "snapshot_json",
+        ] {
+            assert!(r.contains(kw), "registry harus memuat analytics API '{kw}'");
+        }
+        assert!(r.contains("analytics:"), "registry harus memuat kategori analytics");
+        for kw in [
+            "adilang_analytics_record_frame",
+            "adilang_analytics_record_event",
+            "adilang_analytics_snapshot",
+            "adilang_analytics_reset",
+        ] {
+            assert!(r.contains(kw), "registry harus memuat wasm analytics '{kw}'");
+        }
+    }
+
+    #[test]
+    fn registry_meliputi_target_api() {
+        let r = registry_text();
+        for kw in ["default_caps", "select_backend"] {
+            assert!(r.contains(kw), "registry harus memuat target API '{kw}'");
+        }
+        assert!(r.contains("target:"), "registry harus memuat kategori target");
+        for kw in ["adilang_target_info", "adilang_target_select"] {
+            assert!(r.contains(kw), "registry harus memuat wasm target '{kw}'");
+        }
+    }
+
+    #[test]
+    fn registry_meliputi_v1130_lifecycle_tooling() {
+        let r = registry_text();
+        // Lifecycle hooks (v1.13.0) — component + hook kinds
+        for kw in ["on_mount", "on_update", "on_unmount"] {
+            assert!(r.contains(kw), "registry harus memuat lifecycle hook '{kw}'");
+        }
+        assert!(r.contains("lifecycle:"), "registry harus memuat kategori lifecycle");
+        assert!(r.contains("component"), "registry harus memuat declaration 'component'");
+        // Scaffolder (v1.13.0) — `adi new`
+        for kw in ["template_source", "validate_template", "scaffold"] {
+            assert!(r.contains(kw), "registry harus memuat scaffolder API '{kw}'");
+        }
+        assert!(r.contains("scaffolder:"), "registry harus memuat kategori scaffolder");
+        // DevServer+HMR (v1.13.0)
+        for kw in ["serve", "HMR_CONNECT", "HMR_RELOAD", "WS_PATH"] {
+            assert!(r.contains(kw), "registry harus memuat devserver API '{kw}'");
+        }
+        assert!(r.contains("devserver:"), "registry harus memuat kategori devserver");
+        // Build optimizer (v1.13.0)
+        for kw in ["build_project", "savings_percent"] {
+            assert!(r.contains(kw), "registry harus memuat build API '{kw}'");
+        }
+        assert!(r.contains("build:"), "registry harus memuat kategori build");
+        // WASM lifecycle exports ikut tercantum
+        for kw in ["adilang_parse_components", "adilang_run_lifecycle"] {
+            assert!(r.contains(kw), "registry harus memuat wasm lifecycle '{kw}'");
+        }
+    }
+
+    #[test]
+    fn registry_meliputi_v1140_dense_ai_guard_diagnostics_machine() {
+        let r = registry_text();
+        // Dense Compact AST (v1.14.0)
+        for kw in ["dense_spec", "opcode_of_mesh", "size_report", "savings_percent"] {
+            assert!(r.contains(kw), "registry harus memuat dense API '{kw}'");
+        }
+        assert!(r.contains("dense:"), "registry harus memuat kategori dense");
+        // AI Guard (v1.14.0)
+        for kw in ["is_machine_generated", "machine_entropy", "verify_handshake"] {
+            assert!(r.contains(kw), "registry harus memuat ai_guard API '{kw}'");
+        }
+        assert!(r.contains("ai_guard:"), "registry harus memuat kategori ai_guard");
+        // Diagnostics (v1.14.0)
+        for kw in ["machine_error", "error_vector", "diagnostics_report"] {
+            assert!(r.contains(kw), "registry harus memuat diagnostics API '{kw}'");
+        }
+        assert!(r.contains("diagnostics:"), "registry harus memuat kategori diagnostics");
+        // Machine Runner (v1.14.0)
+        for kw in ["from_dense", "dom_ops_json", "webgl_ops_json"] {
+            assert!(r.contains(kw), "registry harus memuat machine API '{kw}'");
+        }
+        assert!(r.contains("machine:"), "registry harus memuat kategori machine");
+        // WASM exports v1.14.0 ikut tercantum
+        for kw in [
+            "adilang_dense_spec",
+            "adilang_ai_guard_verify",
+            "adilang_diag_payload",
+            "adilang_machine_dom_ops",
+            "adilang_machine_webgl_ops",
+            "adilang_machine_run_lifecycle",
+        ] {
+            assert!(r.contains(kw), "registry harus memuat wasm v1.14.0 '{kw}'");
+        }
     }
 
     #[test]

@@ -137,7 +137,8 @@ impl Vocabulary {
     }
 
     pub fn is_builtin_call(&self, name: &str) -> bool {
-        self.transform.contains(name)
+        name == "t" // i18n marker (v1.12.0)
+            || self.transform.contains(name)
             || self.math1.contains(name)
             || self.math2.contains(name)
             || self.math3.contains(name)
@@ -150,6 +151,7 @@ impl Vocabulary {
             "setAlpha" => Some((1, None)),
             "rotate" => Some((1, Some(2))),
             "setScale" | "scaleBy" => Some((1, Some(3))),
+            "t" => Some((1, Some(1))),
             _ => {
                 if self.math1.contains(name) {
                     Some((1, Some(1)))
@@ -271,7 +273,35 @@ fn collect_program_bindings(program: &Program, names: &mut Names) {
                 }
             }
             TopLevel::Handler(h) => collect_stmt_bindings(&h.body, names),
-            _ => {}
+            TopLevel::Camera(_) | TopLevel::Light(_) => {}
+            TopLevel::World(s) | TopLevel::Spatial3D(s) => {
+                for si in &s.items {
+                    match si {
+                        crate::ast::SpatialItem::Func(f) => {
+                            names.declare(&f.name);
+                            for p in &f.params {
+                                names.declare(p);
+                            }
+                            collect_stmt_bindings(&f.body, names);
+                        }
+                        crate::ast::SpatialItem::Let { name, .. } => names.declare(name),
+                        crate::ast::SpatialItem::Entity(e) => {
+                            for h in &e.handlers {
+                                collect_stmt_bindings(&h.body, names);
+                            }
+                        }
+                        crate::ast::SpatialItem::Handler(h) => collect_stmt_bindings(&h.body, names),
+                        _ => {}
+                    }
+                }
+            }
+            TopLevel::Payload(_) | TopLevel::UILayout(_) => {}
+            TopLevel::UseJs(_) | TopLevel::Routes(_) | TopLevel::I18n(_) => {}
+            TopLevel::Component(c) => {
+                for h in &c.hooks {
+                    collect_stmt_bindings(&h.body, names);
+                }
+            }
         }
     }
 }
@@ -490,6 +520,24 @@ impl<'a> Ctx<'a> {
                     }
                 }
             }
+            Stmt::Navigate { path } => {
+                if path.is_empty() {
+                    self.warn("@navigate", "@navigate path kosong", "Berikan path rute, mis. @navigate(\"/home\")");
+                }
+            }
+            Stmt::SetLocale { locale } => {
+                if locale.is_empty() {
+                    self.warn("@set_locale", "@set_locale locale kosong", "Berikan kode locale, mis. @set_locale(\"en\")");
+                }
+            }
+            Stmt::Directive { name, args } => {
+                for a in args {
+                    self.check_expr(a);
+                }
+                if name.is_empty() {
+                    self.warn("directive", "directive tanpa nama", "Berikan nama directive, mis. @fetch_data()");
+                }
+            }
         }
     }
 }
@@ -498,6 +546,16 @@ fn check_program(src: &str, vocab: &Vocabulary, program: &Program) -> Vec<Diagno
     let mut names = Names::default();
     collect_program_bindings(program, &mut names);
     let mut ctx = Ctx { src, vocab, names: &names, diags: Vec::new() };
+
+    // Nama ui_layout yang tersedia — referensi routes (v1.12.0) diverifikasi.
+    let layout_names: std::collections::HashSet<&str> = program
+        .items
+        .iter()
+        .filter_map(|i| match i {
+            TopLevel::UILayout(l) => Some(l.name.as_str()),
+            _ => None,
+        })
+        .collect();
 
     for item in &program.items {
         match item {
@@ -543,6 +601,77 @@ fn check_program(src: &str, vocab: &Vocabulary, program: &Program) -> Vec<Diagno
             TopLevel::Handler(h) => {
                 for s in &h.body {
                     ctx.check_stmt(s);
+                }
+            }
+            TopLevel::World(s) | TopLevel::Spatial3D(s) => {
+                for si in &s.items {
+                    match si {
+                        crate::ast::SpatialItem::Camera(c) => ctx.check_props("camera", &vocab.cameraprop, &c.props),
+                        crate::ast::SpatialItem::Light(l) => {
+                            ctx.check_props("light", &vocab.lightprop, &l.props);
+                            for p in &l.props {
+                                if p.name == "type" {
+                                    if let Expr::Ident(t) = &p.value {
+                                        if !vocab.lightprop_type.contains(t) {
+                                            ctx.warn(
+                                                t,
+                                                &format!("Tipe lampu tidak dikenal '{t}'"),
+                                                &format!("Gunakan: {}", vocab.lightprop_type.iter().map(|s| s.as_str()).collect::<Vec<_>>().join(" ")),
+                                            );
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                        crate::ast::SpatialItem::Entity(e) => {
+                            ctx.check_props("entity", &vocab.entityprop, &e.props);
+                            for h in &e.handlers {
+                                for s in &h.body {
+                                    ctx.check_stmt(s);
+                                }
+                            }
+                        }
+                        crate::ast::SpatialItem::Let { value, .. } => ctx.check_expr(value),
+                        crate::ast::SpatialItem::Func(f) => {
+                            for s in &f.body {
+                                ctx.check_stmt(s);
+                            }
+                        }
+                        crate::ast::SpatialItem::Handler(h) => {
+                            for s in &h.body {
+                                ctx.check_stmt(s);
+                            }
+                        }
+                    }
+                }
+            }
+            TopLevel::Payload(_) | TopLevel::UILayout(_) => {}
+            TopLevel::UseJs(u) => {
+                if !u.url.starts_with("https://") && !u.url.starts_with("http://") {
+                    ctx.warn(
+                        &u.url,
+                        "@use_js url tanpa skema http(s)",
+                        "Gunakan URL absolut, mis. @use_js { url \"https://cdn.example/lib.js\" }",
+                    );
+                }
+            }
+            TopLevel::Routes(r) => {
+                for route in &r.routes {
+                    if !layout_names.contains(route.layout.as_str()) {
+                        ctx.warn(
+                            &route.layout,
+                            &format!("Route '{}' menunjuk ui_layout '{}' yang tidak ada", route.path, route.layout),
+                            "Tambahkan ui_layout dengan nama tersebut atau perbaiki route.layout",
+                        );
+                    }
+                }
+            }
+            TopLevel::I18n(_) => {}
+            TopLevel::Component(c) => {
+                for h in &c.hooks {
+                    for s in &h.body {
+                        ctx.check_stmt(s);
+                    }
                 }
             }
         }

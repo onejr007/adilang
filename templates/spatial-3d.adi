@@ -1,0 +1,33 @@
+routes {
+    route "/" layout "home" transition "fade"
+}
+
+ui_layout "home" {
+    container {
+        navbar "ADI 3D"
+        text "Spatial scene di bawah (WebGL2)"
+    }
+}
+
+world "ADI Hologram" {
+    camera "cam" { pos (0 1.6 7) look (0 0 0) fov 55 }
+    light "key" { type point pos (5 6 4) color (1 0.95 0.9) intensity 1.5 }
+    entity "core" {
+        pos (0 0 0)
+        mesh sphere { radius 0.8 segments 3 }
+        material wire (0.15 0.8 1) 0.9
+        on frame {
+            let s = sin(t) * 0.5
+            rotate(0.35 * t, (0 1 0))
+            setPos(cos(t) * 2, s, 0)
+        }
+    }
+    entity "ring" {
+        pos (0 0 0)
+        mesh torus { radius 1.4 tube 0.05 segments 4 }
+        material solid (0.9 0.5 0.15) 0.85
+        on frame {
+            rotate(-0.2 * t, (1 0.2 0))
+        }
+    }
+}

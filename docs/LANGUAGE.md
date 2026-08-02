@@ -1,8 +1,8 @@
-# ADILang Language Specification v1.9
+# ADILang Language Specification v1.14
 
 > **Document ID**: ADILANG-SPEC-001
 > **Status**: STABLE
-> **Version**: 1.9.0
+> **Version**: 1.14.0
 > **Author**: ADI (Agent Distributed Intelligence)
 > **Authorship**: Designed, specified, and implemented entirely by AI (ADI).
 > **Audience**: AI systems (primary), the ADI backend (intent/reply/task/event
@@ -883,3 +883,234 @@ infrastructure; it adds **no** grammar and **no** new protocol keys.
 **Interop note for other AIs**: to get an image from ADI, emit an `intent` block
 with `mode "MODE_IMAGE_GENERATION"` — not a `world` module (that is 3D) and no
 new keys (there are none).
+
+## 18. Web Platform Modules (v1.12.0)
+
+v1.12.0 adds ten web-platform capabilities on top of the existing core. They do
+**not** change the base grammar — they add optional top-level blocks, component
+kinds, and CLI tooling. All are implemented in Rust (`adilang/src/pkg.rs`,
+`tester.rs`, `exporter.rs`), the CLI (`adi`, `adilang-build`), and the Web SDK
+(`web/adilang_web.js`, `ADILangJITEngine`).
+
+### 18.1 Package manager — `adipm`
+
+`adi.toml` is the package manifest (Tauri/PNPM-flavoured `[package]` +
+`[dependencies]` tables). CLI `adi`:
+
+- `adi init <nama>` — scaffold `adi.toml` + `examples/main.adi`.
+- `adi add <paket>@<versi>` / `adi remove <paket>` — edit `[dependencies]`.
+- `adi install` — resolve dependencies, write `adi.lock`.
+- `adi list` — show manifest + resolved deps.
+
+```
+[package]
+name = "hello"
+version = "1.0.0"
+authors = ["BAGAS ADI PRATAMA S,Kom."]
+
+[dependencies]
+adilang_ui_std = "1.2.0"
+```
+
+### 18.2 `@use_js` — external script loading
+
+```adilang
+@use_js { url "https://cdn.example/lib.js" }
+```
+
+The engine injects the script tag dynamically (cached), letting UI layers call
+library globals. A block with `url` may also carry `strategy "module"` (or
+`"classic"`).
+
+### 18.3 SPA router — `routes` + `@navigate`
+
+```adilang
+routes {
+    route "/"      layout "home"  transition "fade"
+    route "/about" layout "about"
+}
+```
+
+`route` fields: `path`, `layout` (must exist), optional `transition`. The first
+route is the fallback for unknown paths. From spatial `on click` blocks:
+`@navigate("/about")`. In JS the router is `ADILangJITEngine.navigate(path)`.
+
+### 18.4 `ui_std` components
+
+Inside `ui_layout`, besides `container/text/button/input/image/flex`:
+
+- `navbar "Title"` — `<nav>` + title (class `adi-navbar`).
+- `card "Title" { ... }` — titled box (class `adi-card`); `modal` is the same
+  with `role="dialog"`.
+- `footer "© 2026"` — `<footer>`.
+
+### 18.5 Form binding + validation
+
+```adilang
+input "user" placeholder "Nama" bind: @state.username validate "required|email"
+```
+
+- `bind: @state.path` — two-way state binding (dot-walking on `@state`).
+- `validate "required|email"` — pipe-separated rule list (`required`, `email`).
+  Invalid inputs get `data-invalid="true"` + `aria-invalid`.
+
+### 18.6 `adi test` — headless checks
+
+`adi test [file]` runs parse → type-check → UI-structure → simulation checks and
+prints TAP: `ok/not ok N - nama (pesan)` + `# N pass, M fail`; exit 1 on failure.
+
+### 18.7 i18n — `@i18n` + `@set_locale`
+
+```adilang
+@i18n {
+    locale "en" { welcome "Welcome" }
+    locale "id" { welcome "Selamat datang" }
+}
+```
+
+`@set_locale("id")` switches locale; `t(key)` resolves the active dictionary
+(fallback = key itself). Emits `localechange` events.
+
+### 18.8 Exporter + PWA
+
+`adilang-build --target gh-pages [--pwa --js path --out dir --title T --theme T]`
+emits `index.html` + `adilang_web.js` (inline by default), and with `--pwa` also
+`manifest.json`, `sw.js`, `icon.svg`. GitHub Pages deploy via
+`.github/workflows/deploy.yml`. The exported page boots
+`ADILangJITEngine.bootFromInline` on `<script type="text/adi">`.
+
+## 19. Tooling + Lifecycle (v1.13.0)
+
+v1.13.0 adds the production toolchain and component lifecycle on top of v1.12.0's
+web platform. Base grammar is unchanged; all additions are optional and additive.
+
+### 19.1 CLI scaffolder — `adi new`
+
+```bash
+adi new app1                # default: template minimal
+adi new app2 --template spatial-3d
+adi new app3 --template fullstack-agent
+```
+
+Scaffolds `src/main.adi`, `web/adilang_web.js`, and a README tailored to the
+template (templates live in `adilang/src/templates/`).
+
+### 19.2 DevServer + HMR — `adi dev`
+
+`adi dev [--port N]` (default 8080) starts a std-only HTTP static server plus a
+RFC 6455 WebSocket at `/__adi_ws`. It watches `**/*.adi` by mtime and broadcasts
+`HMR_CONNECT`/`HMR_RELOAD` frames. Pages containing `<script type="text/adi">`
+get an HMR bootstrap injected that calls `enableHMR('/__adi_ws', null)` once the
+engine (`window.__adiEngine`) is ready — no build step, edits reload live.
+
+### 19.3 Component lifecycle hooks
+
+```adilang
+component Counter {
+    on_mount:   @set_text("ready")
+    on_update:  @navigate("/home")
+    on_unmount: @set_style("hidden")
+}
+```
+
+Hooks are declared with `on_mount`/`on_update`/`on_unmount` followed by a
+generic directive statement `@name(args)`. Parsed into `LifecycleHookKind` in
+`ast.rs`, executed by the Web SDK JIT (`runLifecycle(name, kind)` +
+`destroy()`), and exposed to WASM via `adilang_parse_components` and
+`adilang_run_lifecycle`. `component` is a declaration keyword in the registry.
+
+### 19.4 Production build — `adi build`
+
+```bash
+cd myapp
+adi build --pwa --ci --runtime web/adilang_web.js --wasm adilang_bg.wasm
+```
+
+Merges `src/*.adi`, validates + compacts each file (token-level DCE), writes
+`dist/app.adi` (bundled source) and `dist/app.adib` (bytecode, zero-token-waste),
+then exports the gh-pages site (`index.html`, runtime, optional PWA) and, when
+`--release`/`--wasm` are given, runs `wasm-opt -Oz --dce`. `--ci` writes
+`.github/workflows/deploy.yml` from `build::CI_TEMPLATE`. Reports DCE savings in
+bytes/percent (`savings_percent`).
+
+## 20. Dense + AI Guard + Diagnostics + Machine Runner (v1.14.0)
+
+v1.14.0 adds the machine-to-machine (AI-to-AI) layer on top of the toolchain:
+a compact bitstream AST (`dense`), an output-integrity validator (`ai_guard`),
+a structured error protocol (`diagnostics`), and a runner that interprets the
+bitstream **directly** into DOM/WebGL2 ops without string parsing. All additions
+are additive; the text grammar of v1.13.0 remains fully valid.
+
+### 20.1 Dense Compact AST — `dense`
+
+`dense.rs` maps UI/spatial nodes to a compact opcode map (bitstream):
+
+| opcode | node | opcode | node |
+|--------|------|--------|------|
+| `0x01` | NodeContainer | `0x0A` | WebGLMeshCube |
+| `0x02` | NodeText | `0x0B` | WebGLMeshSphere |
+| `0x03` | NodeButton | `0x0C` | WebGLMeshTorus |
+| `0x04` | NodeInput | `0x0D` | WebGLMeshIcosa |
+| `0x05` | NodeImage | `0x0E` | WebGLMeshRing |
+| `0x06` | NodeNavbar | `0x0F` | WebGLMeshPlane |
+| `0x07` | NodeCard | `0x10` | WebGLMeshGrid |
+| `0x08` | NodeModal | `0x11` | Node3DCamera |
+| `0x09` | NodeFooter | `0x12` | Node3DLight |
+|       |            | `0x13` | Node3DEntity |
+
+Layout codes share the map (`DENSE_LAYOUT_FLEX = 0x09`, `DENSE_LAYOUT_ROW/COLUMN`).
+`encode_program`/`decode_program` produce/consume the bitstream (a `Result`
+round-trip that is AST-identical); `dense_spec()` returns the human-readable
+opcode map. `json_equivalent` renders the **resolved scene** plus full
+statement-level detail as pretty JSON, `html_equivalent` emits CSS +
+createElement JS + a three.js scene, and `savings_percent`/`size_report` report
+compression vs the JSON/HTML equivalents (≥85% vs JSON, ≥81% vs HTML on the
+reference sample). `opcode_histogram(bin)` prints the distribution of opcodes.
+
+### 20.2 AI Guard — `ai_guard`
+
+Validates that a document really is machine-generated (anti-bland/anti-spoof):
+
+- `fnv1a64` — FNV-1a 64-bit hash (`fnv1a64(b"") = 0xcbf29ce484222325`,
+  `fnv1a64(b"a") = 0xaf63dc4c8601ec8c`, `fnv1a64(b"foobar") = 0x85944171f73967e8`).
+- `sign`/`attach_signature` append `# ADILANG-SIG: <hex>` after canonicalizing
+  with the compactor; `verify`/`extract_signature` check the marker + digest.
+- `machine_entropy` — Shannon entropy (bit & byte) with
+  `MACHINE_ENTROPY_THRESHOLD = 6.0`; `is_machine_generated` returns a
+  `GuardReport { valid, signature, entropy, reason }`.
+- `challenge`/`respond`/`verify_handshake` implement the `ADI-HANDSHAKE:` nonce
+  protocol so two agents can prove machine identity at handshake time.
+
+### 20.3 Diagnostics — `diagnostics`
+
+Structured AI-to-AI error payloads. Error codes `0x0E1`–`0x0EB` include
+`ERR_SYNTAX 0x0E1`, `ERR_BAD_ARITY 0x0E4`, `ERR_DENSE_FORMAT 0x0E8`,
+`ERR_GUARD_SIGNATURE 0x0E9`, `ERR_RUNTIME 0x0EB`. `classify(msg)` maps a message
+back to a code, `node_from_line(line)` maps source lines to AST node ids, and
+`machine_error(code, node)` produces `{"err": 0x0E4, "node": 12}` while
+`error_vector` renders the compact wire form `0E4:12`. `from_checker`/
+`from_result` adapt existing checker/interpreter diagnostics, and
+`diagnostics_report(src)` returns the full JSON report.
+
+### 20.4 Machine Runner — `machine_runner`
+
+`MachineRunner::from_dense(bytes)` decodes the v0x04 bytecode **directly**
+(no string parse) and exposes machine-executable operations:
+
+- `run_lifecycle(name, kind)` / `fire_event(entity_id, kind)` /
+  `run_frame()` — deterministic handler execution (same semantics as
+  `eval::Interpreter`, driven purely from the bitstream).
+- `dom_ops_json()` — per-layout ops `{ op: "create", node, node_hex, id, tag,
+  class, style, text, onClick, bind, validate, title, children }` for a DOM
+  runtime to build nodes from opcodes instead of HTML.
+- `webgl_ops_json()` — ops `{ op: "camera"|"light"|"mesh", node, id, pos, rot,
+  scale, color, material, handlers, kind, intensity, fov, look }` for a
+  three.js/WebGL2 scene.
+- `components_json()` / `spec()` — component inventory and runner report.
+
+WASM exports: `adilang_dense_spec`, `adilang_dense_size_report`,
+`adilang_ai_guard_sign`, `adilang_ai_guard_verify`, `adilang_diag_payload`,
+`adilang_machine_run_lifecycle`, `adilang_machine_dom_ops`,
+`adilang_machine_webgl_ops`, `adilang_machine_fire_event`,
+`adilang_machine_components`.
+

@@ -1,0 +1,41 @@
+@use_js { url "https://cdn.example/agent-utils.js" }
+
+@payload {
+    sender "app"
+    target_agent "agent"
+    intent "deploy"
+}
+
+routes {
+    route "/" layout "home" transition "fade"
+    route "/agents" layout "agents" transition "slide"
+}
+
+@i18n {
+    locale "en" { title "Agent Workspace" status "Ready" }
+    locale "id" { title "Ruang Kerja Agent" status "Siap" }
+}
+
+ui_layout "home" {
+    navbar "AgentAI"
+    card "Status" {
+        input "agent" placeholder "Nama agent" bind: @state.agent_name validate "required"
+        button "Deploy" onClick deploy
+    }
+}
+
+ui_layout "agents" {
+    card "Daftar" {
+        text "agent_status"
+    }
+}
+
+component AgentWorkspace {
+    on_mount: @fetch_data("status")
+    on_update: @log_change("workspace")
+    on_unmount: @cleanup_state("agent_status")
+}
+
+func deploy() {
+    @log_change("deploy")
+}

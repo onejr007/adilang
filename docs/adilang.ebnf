@@ -1,6 +1,6 @@
 # ============================================================================
 # ADILang Formal Grammar — EBNF (W3C-style)
-# Version: 1.9.0  |  Status: STABLE
+# Version: 1.14.0  |  Status: STABLE
 # Author: ADI (Agent Distributed Intelligence) — designed by AI, for AI.
 #
 # This file is the normative, machine-parseable grammar of ADILang.
@@ -26,6 +26,31 @@
 # 1. Document (top level) — exactly one module per source document
 # ---------------------------------------------------------------------------
 document        ::= world | intent | reply | task | event | memory | plan | state
+                  | ui_layout_block | web_block
+
+# ─── v1.12.0: Web Platform blocks (optional; additive) ───────────────────────
+ui_layout_block ::= "ui_layout" String "{" ui_component* "}"
+
+ui_component    ::= "container" "{" ui_component* "}"
+                  | "flex" ("row" | "column") ui_component*
+                  | "text"    String
+                  | "button"  String ("onClick" Ident)?
+                  | "input"   String (Ident value)*
+                  | "image"   (Ident value)*
+                  | "card"    String? "{" ui_component* "}"
+                  | "modal"   String? "{" ui_component* "}"
+                  | "navbar"  String
+                  | "footer"  String
+
+web_block       ::= use_js_block | routes_block | i18n_block | component_block
+use_js_block    ::= "@use_js" "{" "url" String (Ident value)* "}"
+routes_block    ::= "routes" "{" ("route" (String Ident)*)+ "}"
+i18n_block      ::= "@i18n" "{" ("locale" String "{" (Ident String)* "}")+ "}"
+
+# ─── v1.13.0: Component lifecycle (optional; additive) ────────────────────────
+component_block ::= "component" Ident "{" lifecycle_hook* "}"
+lifecycle_hook  ::= ("on_mount" | "on_update" | "on_unmount") ":" directive
+directive       ::= "@" Ident "(" expr_list ")"
 
 # ─── Module: world (3D scene; Rust → WASM → WebGL2) ─────────────────────────
 world           ::= "world" String "{" top_statement* "}"
@@ -271,3 +296,25 @@ state_prop      ::= "user_key" String
 #   - DELTA: mask-based (bit0 pos, bit1 rot, bit2 scale, bit3 color,
 #     bit4 mesh/material) — hanya field yang berubah; struktur berubah = FULL.
 #   - Registry kategori `binary` meng-enumerasi API bytecode (P6).
+#
+# ---------------------------------------------------------------------------
+# 20. Dense opcode map note (v1.14.0 — NOT grammar, for documentation)
+# ---------------------------------------------------------------------------
+# Dense Compact AST (src/dense.rs) is a bitstream ENCODING of the program for
+# machine-to-machine transfer; it is NOT an alternative grammar (the text
+# grammar above remains canonical). Opcode map (registry kategori `dense`):
+#   0x01 NodeContainer   0x0A WebGLMeshCube   0x11 Node3DCamera
+#   0x02 NodeText        0x0B WebGLMeshSphere 0x12 Node3DLight
+#   0x03 NodeButton      0x0C WebGLMeshTorus  0x13 Node3DEntity
+#   0x04 NodeInput       0x0D WebGLMeshIcosa
+#   0x05 NodeImage       0x0E WebGLMeshRing
+#   0x06 NodeNavbar      0x0F WebGLMeshPlane
+#   0x07 NodeCard        0x10 WebGLMeshGrid
+#   0x08 NodeModal
+#   0x09 NodeFooter / DENSE_LAYOUT_FLEX
+# encode_program/decode_program round-trip identik AST; machine_runner
+# (src/machine_runner.rs) menginterpretasi bitstream langsung ke DOM/WebGL2 ops
+# tanpa string parse. AI Guard (src/ai_guard.rs) menandai output mesin dengan
+# `# ADILANG-SIG: <fnv1a64-hex>` + entropi Shannon (threshold 6.0) + handshake
+# `ADI-HANDSHAKE:`. Diagnostics (src/diagnostics.rs) mengemas error mesin sebagai
+# payload {err: 0x0E1..0x0EB, node} / vector `0E4:12`.

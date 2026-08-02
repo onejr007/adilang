@@ -1,6 +1,6 @@
 [package]
 name = "adilang"
-version = "1.9.0"
+version = "1.14.0"
 edition = "2021"
 description = "ADILang — AI-designed protocol/IR language: intent | reply | task | event modules + 3D world module (Rust → WASM → WebGL2)"
 license = "MIT"
@@ -18,12 +18,19 @@ web-sys = { version = "0.3", features = [
     "Event",
     "EventTarget",
     "HtmlCanvasElement",
+    "HtmlButtonElement",
+    "HtmlInputElement",
+    "HtmlSpanElement",
+    "HtmlElement",
     "MouseEvent",
+    "Performance",
     "PointerEvent",
     "WebGl2RenderingContext",
     "Window",
 ] }
 glow = { version = "0.18" }
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
 
 [profile.release]
 opt-level = "s"

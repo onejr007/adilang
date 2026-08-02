@@ -7,6 +7,7 @@ pub enum TokKind {
     Str(String),
     Ident(String),
     // Symbols
+    At,            // @ — payload block prefix (v2.0.0)
     LParen,
     RParen,
     LBrace,
@@ -15,6 +16,7 @@ pub enum TokKind {
     RBracket,     // ]
     Colon,        // : — map literal key separator (v1.6.0)
     Arrow,        // => — match arm (v1.6.0)
+    Dot,          // . — path state di bind (v1.12.0)
     Comma,
     Assign,       // =
     Plus,         // +
@@ -39,6 +41,8 @@ pub struct Token {
 }
 
 pub fn tokenize(src: &str) -> Result<Vec<Token>, String> {
+    // Toleransi BOM UTF-8 (umum pada editor Windows) — dibuang di awal.
+    let src = src.strip_prefix('\u{feff}').unwrap_or(src);
     let chars: Vec<char> = src.chars().collect();
     let mut tokens = Vec::new();
     let mut i = 0usize;
@@ -173,6 +177,7 @@ pub fn tokenize(src: &str) -> Result<Vec<Token>, String> {
 
         // Symbols
         match c {
+            '@' => { tokens.push(Token { kind: TokKind::At, line, col }); bump(&mut i, &mut line, &mut col); }
             '(' => { tokens.push(Token { kind: TokKind::LParen, line, col }); bump(&mut i, &mut line, &mut col); }
             ')' => { tokens.push(Token { kind: TokKind::RParen, line, col }); bump(&mut i, &mut line, &mut col); }
             '{' => { tokens.push(Token { kind: TokKind::LBrace, line, col }); bump(&mut i, &mut line, &mut col); }
@@ -180,6 +185,7 @@ pub fn tokenize(src: &str) -> Result<Vec<Token>, String> {
             '[' => { tokens.push(Token { kind: TokKind::LBracket, line, col }); bump(&mut i, &mut line, &mut col); }
             ']' => { tokens.push(Token { kind: TokKind::RBracket, line, col }); bump(&mut i, &mut line, &mut col); }
             ':' => { tokens.push(Token { kind: TokKind::Colon, line, col }); bump(&mut i, &mut line, &mut col); }
+            '.' => { tokens.push(Token { kind: TokKind::Dot, line, col }); bump(&mut i, &mut line, &mut col); }
             ',' => { tokens.push(Token { kind: TokKind::Comma, line, col }); bump(&mut i, &mut line, &mut col); }
             '=' => {
                 if i + 1 < chars.len() && chars[i + 1] == '>' {
