@@ -572,7 +572,7 @@ protocol keys, but they describe how the ecosystem uses ADILang blocks at runtim
 - Expanded from 4 to 7 monitored services: backend_api, redis, rabbitmq,
   async_worker, frontend_ui, zrok, telegram_bot.
 - `_check_frontend_ui()`: HTTP GET to `frontend_ui:3000`.
-- `_check_zrok()`: HTTP GET to `https://adiapp.share.zrok.io/health`.
+- `_check_zrok()`: HTTP GET to zrok FRONTEND public URL (`ZROK_PUBLIC_URL`, e.g. `https://adiappweb.share.zrok.io`) — v6.16.1: zrok = frontend; BACKEND = Railway (`https://backend-production-041b.up.railway.app`, `BACKEND_PUBLIC_URL`), bukan zrok.
 - `_check_telegram_bot()`: Telegram Bot API `getMe` endpoint (verifies bot token validity).
 - Response time tracking: parse `(Nms)` from check output, store per-service.
 - Event history (72h retention, maxlen=100): deque-based, pruned on each `_record_event()`.
