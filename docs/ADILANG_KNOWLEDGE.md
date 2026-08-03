@@ -428,7 +428,7 @@ Follow the governance in Spec §11. Short version:
 **Changelog convention** (append here):
 
 ```
-## [1.15.0] — 2026-08 — Website ADILang-only (ADI v6.17.0): setiap website yang dibuat ADI WAJIB ditulis sebagai sumber ADILang (ui_layout/routes/@i18n/@payload/component/func) dan dirender framework ADI (ADILangJITEngine inline via core/adilang_site.build_site) — HTML mentah/Bootstrap DITOLAK. Generator deterministik core/adilang_site_gen.py (5 template: default/portfolio/company/store/blog, semua lolos validate_site_source), crew & tool_registry kirim adi_source keyword, update_website parity
+## [1.15.0] — 2026-08 — Website ADILang-only + TANPA Template (ADI v6.17.0): setiap website yang dibuat ADI WAJIB ditulis sebagai sumber ADILang (ui_layout/routes/@i18n/@payload/component/func) dan dirender framework ADI (ADILangJITEngine inline via core/adilang_site.build_site) — HTML mentah/Bootstrap DITOLAK. Sumber DIHASILKAN OLEH LLM (core/adilang_site_gen.py, TANPA template hardcoded) + divalidasi dua lapis (validate_site_source struktur offline + validate_js_parse parser ASLI framework ADI via Node; loop koreksi LLM bila gagal; tanpa template fallback), crew & tool_registry kirim adi_source keyword, update_website parity, fungsi template Bootstrap dihapus total
 ## [1.14.0] — 2026-08 — Dense + AI Guard + Diagnostics + Machine Runner: Dense Compact AST (opcode map bitstream `0x01`=NodeContainer `0x02`=NodeText `0x0A`=WebGLMeshCube s/d `0x13`=Node3DEntity, dense_spec/encode_program/decode_program, opcode_histogram, json_equivalent (scene tersolve + detail statement) & html_equivalent, savings ≥85% vs JSON / ≥81% vs HTML pada SAMPLE), AI Guard (FNV-1a 64-bit signature `# ADILANG-SIG: <hex>` + machine_entropy Shannon threshold 6.0 + handshake `ADI-HANDSHAKE:`), Diagnostics mesin (kode error 0x0E1–0x0EB, machine_error `{err, node}`, error_vector `0E4:12`, diagnostics_report), Machine Runner (interpretasi bitstream langsung tanpa string parse → run_lifecycle/fire_event/run_frame, dom_ops_json & webgl_ops_json untuk DOM/WebGL2 runtime), WASM exports adilang_dense_spec/adilang_dense_size_report/adilang_ai_guard_sign/adilang_ai_guard_verify/adilang_diag_payload/adilang_machine_*
 ## [1.13.0] — 2026-08 — Tooling + Lifecycle: CLI scaffolder `adi new` (template minimal / spatial-3d / fullstack-agent), DevServer + HMR `adi dev` (HTTP statis + WebSocket RFC 6455, frame HMR_CONNECT/HMR_RELOAD, mtime-watcher `**/*.adi`), lifecycle hooks `component Name { on_mount/on_update/on_unmount: @directive() }` + directive statement generik `@name(args)`, WASM exports adilang_parse_components/adilang_run_lifecycle, production build `adi build` (merge src/*.adi + DCE compact text → dist/app.adi, bytecode → app.adib, gh-pages export + PWA + wasm-opt -Oz --dce + CI deploy.yml), bytecode decode_block_stmt() fix
 ## [1.12.0] — 2026-08 — Web Platform Modules: package manager adipm (adi.toml + CLI `adi init/add/remove/install/list`), `@use_js` external script loader, gh-pages exporter (`adilang-build` + CI/CD deploy.yml), live preview `ADILangJITEngine` (bootFromInline), SPA router (`routes` + `@navigate`), ui_std (navbar/card/modal/footer), form binding+validasi (`bind: @state.path` + `validate "required|email"`), `adi test` headless (TAP), i18n (`@i18n` + `@set_locale` + t()), PWA (`--pwa`: manifest.json/sw.js/icon.svg)
@@ -621,17 +621,19 @@ setiap website yang dibuat ADI untuk pengguna WAJIB ditulis sebagai **sumber ADI
 **framework ADI** (`ADILangJITEngine` dari `web/adilang_web.js`, di-inline ke `index.html`
 via `core/adilang_site.build_site()`). HTML mentah / Bootstrap **DITOLAK**.
 
-- Sumber situs: `core/adilang_site_gen.py` (generator deterministik, 5 template —
-  default/portfolio/company/store/blog; konten di-enrich LLM + fallback keyword).
-- Validasi: `core/adilang_site.validate_site_source()` (tolak HTML, wajib blok UI,
-  scan pola berbahaya).
+- Sumber situs: `core/adilang_site_gen.py` — **DIHASILKAN OLEH LLM (TANPA template)**.
+  ADI berkomunikasi dengan LLM untuk menulis ADILang kreatif sesuai deskripsi user
+  (+konten enriched LLM pass 1), lalu memvalidasi & meminta LLM memperbaiki bila gagal.
+- Validasi dua lapis: `core/adilang_site.validate_site_source()` (tolak HTML, wajib
+  blok UI, scan pola berbahaya) + `core/adilang_site.validate_js_parse()` (parser
+  **asli framework ADI** via Node — memastikan situs benar-benar ter-render).
 - Alur: `crew._generate_website_direct` → `tool_registry create_website/update_website`
   (keyword `adi_source`) → push `index.html` (framework ADI) + `app.adi` (sumber)
   ke repo `adi-web-collection` → URL publik via ZROK frontend `/websites/{folder}/`.
 - Konvensi: file sumber selalu `app.adi`; framework ADI yang me-render, bukan HTML statis.
 
 
-ADI tidak hanya membangun website (v6.12.2) — sejak **v6.15.0** ADI juga
+ADI tidak hanya membangun website (sejak v6.17.0 100% ADILang + framework ADI) — sejak **v6.15.0** ADI juga
 **membuat gambar secara 100% lokal** (numpy + Pillow, TANPA API eksternal).
 Ini adalah kemampuan runtime backend, bukan modul ADILang baru:
 
