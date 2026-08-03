@@ -115,8 +115,10 @@ fn render_index(title: &str, escaped_src: &str, pwa: bool, theme: &str) -> Strin
 {sw_boot}  <script>
     window.addEventListener('DOMContentLoaded', function () {{
       var root = document.getElementById('app');
-      if (window.ADILangJITEngine && root) {{
-        window.ADILangJITEngine.bootFromInline(root).then(function (e) {{
+      var adi = window.ADILang || {{}};
+      var JIT = adi.ADILangJITEngine || window.ADILangJITEngine;
+      if (JIT && root) {{
+        JIT.bootFromInline(root).then(function (e) {{
           window.__adiEngine = e;
         }});
       }}
