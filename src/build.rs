@@ -1,14 +1,15 @@
-// ADILang production build optimizer — `adi build [--release]` (v1.13.0).
+// ADILang production build optimizer — `adi build [--release]` (v1.15.0).
 // Dirancang & ditulis oleh AI (ADI Agent Ecosystem).
 //
 // Tahap build (deterministik, tanpa GPU/browser):
 //   1. Discover semua `*.adi` di `src/` → validasi (check_src) + kompak
 //      (compactor — DCE token-level: rename variabel & buang whitespace).
-//   2. Gabung source → dist/app.adi (bundled source, siap `adi dev`/JIT).
+//   2. Gabung source → dist/app.adi (bundled source, siap JIT/komunikasi AI).
 //   3. Encode AST → bytecode Zero-Token-Waste → dist/app.adib.
-//   4. Ekspor situs statis (index.html + runtime) memakai exporter.
+//   4. Ekspor situs statis (index.html render minimal, tanpa runtime JS —
+//      ADILang TIDAK dipakai untuk membangun website, hanya komunikasi AI).
 //   5. (--release) wasm-opt --dce pada wasm bila tersedia (Dead Code
-//      Elimination level binary), salin web/adilang_web.js.
+//      Elimination level binary).
 //   6. (--ci) generate .github/workflows/deploy.yml dari template.
 
 use std::path::{Path, PathBuf};
@@ -16,9 +17,6 @@ use std::path::{Path, PathBuf};
 /// Opsi build produksi.
 #[derive(Debug, Clone)]
 pub struct BuildOptions {
-    /// Path ke adilang_web.js (runtime). Bila None, dicari di
-    /// `web/adilang_web.js` relatif ke root.
-    pub runtime_js: Option<PathBuf>,
     /// Path wasm hasil `cargo build --release --target wasm32-unknown-unknown`.
     /// Di-optimasi dengan wasm-opt (bila tersedia di PATH).
     pub wasm: Option<PathBuf>,
@@ -33,7 +31,6 @@ pub struct BuildOptions {
 impl Default for BuildOptions {
     fn default() -> Self {
         Self {
-            runtime_js: None,
             wasm: None,
             pwa: false,
             ci: false,
@@ -116,29 +113,13 @@ pub fn build_project(root: &Path, opts: &BuildOptions) -> Result<BuildReport, St
     let app_adib = dist.join("app.adib");
     std::fs::write(&app_adib, &bin).map_err(|e| e.to_string())?;
 
-    // 4. Situs statis + runtime.
-    let runtime_path = opts
-        .runtime_js
-        .clone()
-        .or_else(|| find_runtime_js(root));
-    let runtime = match runtime_path {
-        Some(p) => {
-            let js = std::fs::read_to_string(&p)
-                .map_err(|e| format!("Gagal baca runtime '{}': {e}", p.display()))?;
-            let dest = dist.join("adilang_web.js");
-            std::fs::write(&dest, &js).map_err(|e| e.to_string())?;
-            js
-        }
-        None => {
-            return Err("adilang_web.js tidak ditemukan (beri --runtime <path>)".to_string());
-        }
-    };
+    // 4. Situs statis (render minimal — tanpa runtime JS).
     let export_opts = crate::exporter::ExportOptions {
         pwa: opts.pwa,
         title: opts.title.clone(),
         theme_color: None,
     };
-    for (name, content) in crate::exporter::export_gh_pages(&merged, &runtime, &export_opts)? {
+    for (name, content) in crate::exporter::export_gh_pages(&merged, &export_opts)? {
         let p = dist.join(name);
         std::fs::write(&p, content).map_err(|e| e.to_string())?;
     }
@@ -157,7 +138,7 @@ pub fn build_project(root: &Path, opts: &BuildOptions) -> Result<BuildReport, St
             .map_err(|e| format!("Gagal tulis deploy.yml: {e}"))?;
     }
 
-    let mut out = vec![app_adi, app_adib, dist.join("index.html"), dist.join("adilang_web.js")];
+    let mut out = vec![app_adi, app_adib, dist.join("index.html")];
     if opts.pwa {
         out.push(dist.join("manifest.json"));
         out.push(dist.join("sw.js"));
@@ -239,18 +220,6 @@ fn collect_adi_files(dir: &Path) -> Vec<PathBuf> {
     out
 }
 
-fn find_runtime_js(root: &Path) -> Option<PathBuf> {
-    let web = root.join("web").join("adilang_web.js");
-    if web.exists() {
-        return Some(web);
-    }
-    let pkg = root.join("adilang").join("web").join("adilang_web.js");
-    if pkg.exists() {
-        return Some(pkg);
-    }
-    None
-}
-
 /// Template CI/CD (GitHub Actions) — dipakai `--ci`.
 pub const CI_TEMPLATE: &str = r#"name: Deploy ADILang
 
@@ -284,9 +253,6 @@ jobs:
         run: cargo test --lib
         working-directory: adilang
 
-      - name: Web SDK selfTest
-        run: node -e "const A=require('./adilang/web/adilang_web.js');const r=A.selfTest();if(!r.ok){process.exit(1)}"
-
       - name: ADI build
         run: adilang-build --target gh-pages --pwa
 
@@ -306,7 +272,6 @@ mod tests {
         let dir = std::env::temp_dir().join(format!("adi_build_test_{}", std::process::id()));
         let root = dir.join("proj");
         std::fs::create_dir_all(root.join("src")).unwrap();
-        std::fs::create_dir_all(root.join("web")).unwrap();
         std::fs::write(
             root.join("src").join("main.adi"),
             r#"
@@ -327,7 +292,6 @@ mod tests {
             "#,
         )
         .unwrap();
-        std::fs::write(root.join("web").join("adilang_web.js"), "/* runtime */\n").unwrap();
 
         let opts = BuildOptions { pwa: true, ..Default::default() };
         let rep = build_project(&root, &opts).expect("build ok");
@@ -355,9 +319,7 @@ mod tests {
         let dir = std::env::temp_dir().join(format!("adi_ci_test_{}", std::process::id()));
         let root = dir.join("proj");
         std::fs::create_dir_all(root.join("src")).unwrap();
-        std::fs::create_dir_all(root.join("web")).unwrap();
         std::fs::write(root.join("src").join("a.adi"), "ui_layout \"x\" { text \"a\" }\n").unwrap();
-        std::fs::write(root.join("web").join("adilang_web.js"), "/* r */\n").unwrap();
         let opts = BuildOptions { ci: true, ..Default::default() };
         let _ = build_project(&root, &opts).expect("build ok");
         let yml = std::fs::read_to_string(root.join(".github").join("workflows").join("deploy.yml"))

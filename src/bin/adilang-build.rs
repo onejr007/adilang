@@ -1,18 +1,18 @@
-// ADILang build tool — `adilang-build` (v1.12.0).
+// ADILang build tool — `adilang-build` (v1.15.0).
 // Dirancang & ditulis oleh AI (ADI Agent Ecosystem).
 //
 //   adilang-build --target gh-pages [--pwa] [--title T] [--theme #hex] \
-//                 [--js <runtime.js>] [--out <dir>] [input.adi]
+//                 [--out <dir>] [input.adi]
 //
-// Menghasilkan situs statis (index.html + adilang_web.js + icon.svg +
+// Menghasilkan situs statis (index.html render minimal + icon.svg +
 // optional manifest.json + sw.js untuk PWA) siap deploy ke GitHub Pages.
+// TANPA runtime JS — ADILang tidak lagi dipakai untuk membangun website.
 
 use std::fs;
 use std::path::Path;
 
 use adilang::exporter::{self, ExportOptions};
 
-const DEFAULT_RUNTIME: &str = "web/adilang_web.js";
 const DEFAULT_OUT: &str = "dist";
 
 fn usage() {
@@ -21,7 +21,6 @@ fn usage() {
     println!("  --pwa               aktifkan manifest.json + sw.js (offline)");
     println!("  --title <T>         judul situs (fallback: nama program)");
     println!("  --theme <#hex>      warna tema PWA");
-    println!("  --js <file>         runtime adilang_web.js (default: {DEFAULT_RUNTIME})");
     println!("  --out <dir>         direktori output (default: {DEFAULT_OUT})");
 }
 
@@ -29,7 +28,6 @@ fn main() {
     let args: Vec<String> = std::env::args().skip(1).collect();
     let mut target: Option<String> = None;
     let mut opts = ExportOptions::default();
-    let mut runtime_path = DEFAULT_RUNTIME.to_string();
     let mut out_dir = DEFAULT_OUT.to_string();
     let mut input: Option<String> = None;
 
@@ -62,14 +60,6 @@ fn main() {
                     std::process::exit(2);
                 }
                 opts.theme_color = Some(args[i].clone());
-            }
-            "--js" => {
-                i += 1;
-                if i >= args.len() {
-                    eprintln!("adilang-build: --js butuh nilai");
-                    std::process::exit(2);
-                }
-                runtime_path = args[i].clone();
             }
             "--out" => {
                 i += 1;
@@ -121,17 +111,8 @@ fn main() {
             std::process::exit(1);
         }
     };
-    let runtime = match fs::read_to_string(&runtime_path) {
-        Ok(s) => s,
-        Err(e) => {
-            eprintln!(
-                "adilang-build: tidak bisa membaca runtime '--js {runtime_path}': {e}"
-            );
-            std::process::exit(1);
-        }
-    };
 
-    let files = match exporter::export_gh_pages(&src, &runtime, &opts) {
+    let files = match exporter::export_gh_pages(&src, &opts) {
         Ok(f) => f,
         Err(e) => {
             eprintln!("adilang-build: ekspor gagal: {e}");

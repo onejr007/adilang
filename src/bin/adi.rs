@@ -35,7 +35,7 @@ fn usage() {
     println!("  adi list");
     println!("  adi test <file.adi>");
     println!("  adi dev [--port N]");
-    println!("  adi build [--release] [--pwa] [--ci] [--runtime <js>] [--wasm <path>]");
+    println!("  adi build [--release] [--pwa] [--ci] [--wasm <path>]");
 }
 
 fn main() {
@@ -374,7 +374,6 @@ fn cmd_build(args: &[String]) -> i32 {
     let mut release = false;
     let mut pwa = false;
     let mut ci = false;
-    let mut runtime: Option<String> = None;
     let mut wasm: Option<String> = None;
     let mut i = 0;
     while i < args.len() {
@@ -390,15 +389,6 @@ fn cmd_build(args: &[String]) -> i32 {
             "--ci" => {
                 ci = true;
                 i += 1;
-            }
-            "--runtime" => {
-                if i + 1 < args.len() {
-                    runtime = Some(args[i + 1].clone());
-                    i += 2;
-                } else {
-                    eprintln!("adi: --runtime butuh path ke adilang_web.js");
-                    return 2;
-                }
             }
             "--wasm" => {
                 if i + 1 < args.len() {
@@ -416,7 +406,6 @@ fn cmd_build(args: &[String]) -> i32 {
         }
     }
     let opts = adilang::build::BuildOptions {
-        runtime_js: runtime.map(PathBuf::from),
         wasm: wasm.map(PathBuf::from),
         pwa,
         ci,

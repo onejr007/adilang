@@ -1,7 +1,7 @@
 # ADILang Knowledge Base (KB)
 
 > **Document ID**: ADILANG-KB-001
-> **Version**: 1.14.0
+> **Version**: 1.16.0
 > **Status**: STABLE
 > **Author**: ADI (Agent Distributed Intelligence)
 > **Purpose**: Self-contained learning corpus so **any AI** can learn ADILang from
@@ -428,7 +428,9 @@ Follow the governance in Spec §11. Short version:
 **Changelog convention** (append here):
 
 ```
-## [1.14.1] — 2026-08 — Web SDK bugfix BOOT di browser asli: `ADILangJITEngine.bootFromInline` kini fallback ke query document-wide bila `<script type="text/adi">` tidak berada DI DALAM root (adilang-build exporter.rs & core/adilang_site.build_index_html menaruh script sebagai SAUDARA `#app`) DAN — root cause sesungguhnya: boot script (kedua builder) memanggil `window.ADILangJITEngine.bootFromInline(root)` padahal UMD SDK mengekspos `window.ADILang` (object berisi ADILangJITEngine), jadi di browser sungguhan `window.ADILangJITEngine === undefined` → blok boot tak pernah jalan → halaman KOSONG. Fix: UMD kini juga mengekspos alias `window.ADILangJITEngine`/`window.ADILangEngine` (selain `window.ADILang`), dan boot script di exporter.rs + build_index_html memakai `var JIT = (window.ADILang||{}).ADILangJITEngine || window.ADILangJITEngine`. Terverifikasi headless Edge (browser asli): #app ter-render (1 child, ~3KB DOM), teks produk/harga muncul. Regression harness scripts/adilang_js_boot.js kini menguji jalur global/window yang sama dengan browser
+## [1.16.0] — 2026-08 — Web SDK dihapus, ADILang murni bahasa komunikasi AI (ADI v6.18.0): website TIDAK lagi dibangun dari ADILang — setiap website ADI ditulis LANGSUNG oleh LLM dalam HTML+CSS+JS murni (core/site_gen.py + core/site_assets.py di backend ADI; tanpa template, tanpa framework). `web/adilang_web.js`, harness `scripts/adilang_js_boot.js`/`adilang_js_parse.js`, dan test Web SDK dihapus. `export_gh_pages` tidak lagi butuh runtime JS — ekspor statis menghasilkan `index.html` render minimal (source ADILang dalam `<pre>`). CLI `--runtime`/`--js` dihapus. ADILang tetap dipertahankan sebagai bahasa protokol/IR untuk komunikasi AI↔AI/LLM (intent/reply/plan/protocol/a2a/dense/crdt) dan seluruh toolchain-nya (parser/checker/bytecode/wasm/machine).
+
+## [1.14.1] — 2026-08 — (Web SDK — SUPERSEDED oleh [1.16.0]) Web SDK bugfix BOOT di browser asli: `ADILangJITEngine.bootFromInline` kini fallback ke query document-wide bila `<script type="text/adi">` tidak berada DI DALAM root (adilang-build exporter.rs & core/adilang_site.build_index_html menaruh script sebagai SAUDARA `#app`) DAN — root cause sesungguhnya: boot script (kedua builder) memanggil `window.ADILangJITEngine.bootFromInline(root)` padahal UMD SDK mengekspos `window.ADILang` (object berisi ADILangJITEngine), jadi di browser sungguhan `window.ADILangJITEngine === undefined` → blok boot tak pernah jalan → halaman KOSONG. Fix: UMD kini juga mengekspos alias `window.ADILangJITEngine`/`window.ADILangEngine` (selain `window.ADILang`), dan boot script di exporter.rs + build_index_html memakai `var JIT = (window.ADILang||{}).ADILangJITEngine || window.ADILangJITEngine`. Terverifikasi headless Edge (browser asli): #app ter-render (1 child, ~3KB DOM), teks produk/harga muncul. Regression harness scripts/adilang_js_boot.js kini menguji jalur global/window yang sama dengan browser
 
 ## [1.15.0] — 2026-08 — Website ADILang-only + TANPA Template (ADI v6.17.0): setiap website yang dibuat ADI WAJIB ditulis sebagai sumber ADILang (ui_layout/routes/@i18n/@payload/component/func) dan dirender framework ADI (ADILangJITEngine inline via core/adilang_site.build_site) — HTML mentah/Bootstrap DITOLAK. Sumber DIHASILKAN OLEH LLM (core/adilang_site_gen.py, TANPA template hardcoded) + divalidasi dua lapis (validate_site_source struktur offline + validate_js_parse parser ASLI framework ADI via Node; loop koreksi LLM bila gagal; tanpa template fallback), crew & tool_registry kirim adi_source keyword, update_website parity, fungsi template Bootstrap dihapus total
 ## [1.14.0] — 2026-08 — Dense + AI Guard + Diagnostics + Machine Runner: Dense Compact AST (opcode map bitstream `0x01`=NodeContainer `0x02`=NodeText `0x0A`=WebGLMeshCube s/d `0x13`=Node3DEntity, dense_spec/encode_program/decode_program, opcode_histogram, json_equivalent (scene tersolve + detail statement) & html_equivalent, savings ≥85% vs JSON / ≥81% vs HTML pada SAMPLE), AI Guard (FNV-1a 64-bit signature `# ADILANG-SIG: <hex>` + machine_entropy Shannon threshold 6.0 + handshake `ADI-HANDSHAKE:`), Diagnostics mesin (kode error 0x0E1–0x0EB, machine_error `{err, node}`, error_vector `0E4:12`, diagnostics_report), Machine Runner (interpretasi bitstream langsung tanpa string parse → run_lifecycle/fire_event/run_frame, dom_ops_json & webgl_ops_json untuk DOM/WebGL2 runtime), WASM exports adilang_dense_spec/adilang_dense_size_report/adilang_ai_guard_sign/adilang_ai_guard_verify/adilang_diag_payload/adilang_machine_*
@@ -615,9 +617,16 @@ protocol keys, but they describe how the ecosystem uses ADILang blocks at runtim
   `/api/v1/knowledge/search` endpoint.
 
 ### 10.11 Local Image Generation Engine (ADI v6.15.0) — ADI membuat GAMBAR 100% lokal
-### 10.12 Website ADILang-only (ADI v6.17.0) — setiap website WAJIB bahasa ADILang + framework ADI
+### 10.12 Website ADILang-only (ADI v6.17.0) — SUPERSEDED v6.18.0
 
-Sejak **v6.17.0** kebijakan Website Creation Engine ADI adalah **ADILang-only**:
+> **v6.18.0 (arah baru):** website ADI **TIDAK lagi** dibangun dari ADILang.
+> Setiap website ditulis LANGSUNG oleh LLM dalam **HTML + CSS + JS murni**
+> (backend: `core/site_gen.generate_site_assets` + `core/site_assets.validate_site_assets`;
+> deploy: `core/tools/github_site` push `index.html` + `style.css` + `app.js`).
+> `web/adilang_web.js` + harness + Web SDK test dihapus. ADILang dipertahankan
+> sebagai **bahasa komunikasi antar-AI** (intent/reply/plan/protocol/a2a/dense/crdt).
+
+Sebelum v6.18.0, kebijakan Website Creation Engine ADI adalah **ADILang-only**:
 setiap website yang dibuat ADI untuk pengguna WAJIB ditulis sebagai **sumber ADILang**
 (`ui_layout` / `routes` / `@i18n` / `@payload` / `component` / `func`) dan dirender oleh
 **framework ADI** (`ADILangJITEngine` dari `web/adilang_web.js`, di-inline ke `index.html`
@@ -635,7 +644,7 @@ via `core/adilang_site.build_site()`). HTML mentah / Bootstrap **DITOLAK**.
 - Konvensi: file sumber selalu `app.adi`; framework ADI yang me-render, bukan HTML statis.
 
 
-ADI tidak hanya membangun website (sejak v6.17.0 100% ADILang + framework ADI) — sejak **v6.15.0** ADI juga
+ADI tidak hanya membangun website (sejak v6.18.0 langsung HTML/CSS/JS via LLM) — sejak **v6.15.0** ADI juga
 **membuat gambar secara 100% lokal** (numpy + Pillow, TANPA API eksternal).
 Ini adalah kemampuan runtime backend, bukan modul ADILang baru:
 

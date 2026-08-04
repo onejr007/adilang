@@ -1,8 +1,8 @@
-# ADILang Language Specification v1.14
+# ADILang Language Specification v1.16
 
 > **Document ID**: ADILANG-SPEC-001
 > **Status**: STABLE
-> **Version**: 1.14.0
+> **Version**: 1.16.0
 > **Author**: ADI (Agent Distributed Intelligence)
 > **Authorship**: Designed, specified, and implemented entirely by AI (ADI).
 > **Audience**: AI systems (primary), the ADI backend (intent/reply/task/event
@@ -884,13 +884,16 @@ infrastructure; it adds **no** grammar and **no** new protocol keys.
 with `mode "MODE_IMAGE_GENERATION"` — not a `world` module (that is 3D) and no
 new keys (there are none).
 
-## 18. Web Platform Modules (v1.12.0)
+## 18. Web Platform Modules (v1.15.0)
 
-v1.12.0 adds ten web-platform capabilities on top of the existing core. They do
+v1.12.0 adds web-platform capabilities on top of the existing core. They do
 **not** change the base grammar — they add optional top-level blocks, component
 kinds, and CLI tooling. All are implemented in Rust (`adilang/src/pkg.rs`,
-`tester.rs`, `exporter.rs`), the CLI (`adi`, `adilang-build`), and the Web SDK
-(`web/adilang_web.js`, `ADILangJITEngine`).
+`tester.rs`, `exporter.rs`), and the CLI (`adi`, `adilang-build`).
+
+> v6.18.0: Web SDK browser (`web/adilang_web.js`) dihapus. ADILang tidak lagi
+> dipakai untuk membangun website — ekspor statis menghasilkan `index.html`
+> render minimal (source ADILang dalam `<pre>`).
 
 ### 18.1 Package manager — `adipm`
 
@@ -933,7 +936,8 @@ routes {
 
 `route` fields: `path`, `layout` (must exist), optional `transition`. The first
 route is the fallback for unknown paths. From spatial `on click` blocks:
-`@navigate("/about")`. In JS the router is `ADILangJITEngine.navigate(path)`.
+`@navigate("/about")`. (v6.18.0: JS engine/`ADILangJITEngine` dihapus — routing
+ini dipakai untuk komunikasi antar-AI, bukan untuk website.)
 
 ### 18.4 `ui_std` components
 
@@ -973,11 +977,11 @@ prints TAP: `ok/not ok N - nama (pesan)` + `# N pass, M fail`; exit 1 on failure
 
 ### 18.8 Exporter + PWA
 
-`adilang-build --target gh-pages [--pwa --js path --out dir --title T --theme T]`
-emits `index.html` + `adilang_web.js` (inline by default), and with `--pwa` also
-`manifest.json`, `sw.js`, `icon.svg`. GitHub Pages deploy via
-`.github/workflows/deploy.yml`. The exported page boots
-`ADILangJITEngine.bootFromInline` on `<script type="text/adi">`.
+`adilang-build --target gh-pages [--pwa --out dir --title T --theme T]`
+emits `index.html` (render minimal: source ADILang dalam `<pre>`) + `icon.svg`,
+and with `--pwa` also `manifest.json`, `sw.js`. GitHub Pages deploy via
+`.github/workflows/deploy.yml`. Tidak ada runtime JS — ADILang dipakai untuk
+komunikasi antar-AI, bukan untuk membangun website.
 
 ## 19. Tooling + Lifecycle (v1.13.0)
 
@@ -992,7 +996,7 @@ adi new app2 --template spatial-3d
 adi new app3 --template fullstack-agent
 ```
 
-Scaffolds `src/main.adi`, `web/adilang_web.js`, and a README tailored to the
+Scaffolds `src/main.adi` and a README tailored to the
 template (templates live in `adilang/src/templates/`).
 
 ### 19.2 DevServer + HMR — `adi dev`
@@ -1015,20 +1019,20 @@ component Counter {
 
 Hooks are declared with `on_mount`/`on_update`/`on_unmount` followed by a
 generic directive statement `@name(args)`. Parsed into `LifecycleHookKind` in
-`ast.rs`, executed by the Web SDK JIT (`runLifecycle(name, kind)` +
-`destroy()`), and exposed to WASM via `adilang_parse_components` and
+`ast.rs`, executed via WASM `adilang_parse_components` and
 `adilang_run_lifecycle`. `component` is a declaration keyword in the registry.
 
 ### 19.4 Production build — `adi build`
 
 ```bash
 cd myapp
-adi build --pwa --ci --runtime web/adilang_web.js --wasm adilang_bg.wasm
+adi build --pwa --ci --wasm adilang_bg.wasm
 ```
 
 Merges `src/*.adi`, validates + compacts each file (token-level DCE), writes
 `dist/app.adi` (bundled source) and `dist/app.adib` (bytecode, zero-token-waste),
-then exports the gh-pages site (`index.html`, runtime, optional PWA) and, when
+then exports the gh-pages site (`index.html` render minimal — tanpa runtime JS,
+optional PWA) and, when
 `--release`/`--wasm` are given, runs `wasm-opt -Oz --dce`. `--ci` writes
 `.github/workflows/deploy.yml` from `build::CI_TEMPLATE`. Reports DCE savings in
 bytes/percent (`savings_percent`).
