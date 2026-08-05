@@ -425,7 +425,15 @@ pub fn optimize_src(src: &str) -> Result<String, String> {
     Ok(render_program(&program))
 }
 
-// ── Renderer kompak (tanpa indentasi, tanpa spasi berlebih) ─────────────────
+// ── Renderer kompak (v1.8.1, T-123 — token-minimum, tanpa spasi opsional) ─
+// Aturan kompresi (aman leksikal, roundtrip AST diuji di mod tests):
+//   - operator biner TANPA spasi   (`a+b`, `a==b`) — lexer memisah token;
+//   - list/map/call rapat          (`[1,2]`, `{k:v}`, `f(1,2)`);
+//   - braces rapat                 (`{stmts}`, `entity "e"{...}`);
+//   - statement dipisah SATU spasi (parser whitespace-agnostic; spasi wajib
+//     agar dua identifier berdekatan tidak menyatu, mis. `let a = 1 b`);
+//   - top-level tetap dipisah baris baru (biaya token sama dengan spasi,
+//     lebih terbaca saat inspect; render_pretty tetap untuk presentasi).
 fn q(s: &str) -> String {
     let mut out = String::with_capacity(s.len() + 2);
     out.push('"');
@@ -467,10 +475,10 @@ fn op_sym(op: &BinOp) -> &'static str {
     }
 }
 
-/// Render ekspresi. Binary di-render FLAT (tanpa paren) — aman karena ADILang
-/// tidak memiliki paren-gruping: paren = tuple, sehingga AST valid dari
-/// precedence-climbing selalu berisi anak ber-precedence ≥ parent (roundtrip
-/// diuji). Argumen builder di-render tanpa paren (bentuk kanonik `sphere 1 {...}`).
+/// Render ekspresi — TANPA spasi di sekitar operator & pemisah (hemat token).
+/// Binary di-render FLAT (tanpa paren) — aman karena ADILang tidak memiliki
+/// paren-gruping: paren = tuple, sehingga AST valid dari precedence-climbing
+/// selalu berisi anak ber-precedence ≥ parent (roundtrip diuji).
 pub fn render_expr(e: &Expr) -> String {
     match e {
         Expr::Num(n) => num(*n),
@@ -483,35 +491,27 @@ pub fn render_expr(e: &Expr) -> String {
             }
         }
         Expr::Tuple(items) => {
-            let body = items
-                .iter()
-                .map(render_expr)
-                .collect::<Vec<_>>()
-                .join(" ");
-            format!("({body})")
+            format!("({})", items.iter().map(render_expr).collect::<Vec<_>>().join(" "))
         }
         Expr::List(items) => {
-            let body = items
-                .iter()
-                .map(render_expr)
-                .collect::<Vec<_>>()
-                .join(", ");
-            format!("[{body}]")
+            format!("[{}]", items.iter().map(render_expr).collect::<Vec<_>>().join(","))
         }
         Expr::Map(pairs) => {
-            let body = pairs
-                .iter()
-                .map(|(k, v)| format!("{}: {}", k, render_expr(v)))
-                .collect::<Vec<_>>()
-                .join(", ");
-            format!("{{{body}}}")
+            format!(
+                "{{{}}}",
+                pairs
+                    .iter()
+                    .map(|(k, v)| format!("{}:{}", k, render_expr(v)))
+                    .collect::<Vec<_>>()
+                    .join(",")
+            )
         }
         Expr::Ident(name) => name.clone(),
         Expr::Call { name, args, props } => {
             let builder = crate::registry::is_builder(name);
             let mut out = String::new();
             if builder {
-                // bentuk kanonik builder: `sphere 1 { ... }` (posisi = arg)
+                // bentuk kanonik builder: `sphere 1{...}` (posisi = arg)
                 out.push_str(name);
                 for a in args {
                     out.push(' ');
@@ -520,29 +520,24 @@ pub fn render_expr(e: &Expr) -> String {
             } else {
                 out.push_str(name);
                 out.push('(');
-                let body = args
-                    .iter()
-                    .map(render_expr)
-                    .collect::<Vec<_>>()
-                    .join(", ");
-                out.push_str(&body);
+                out.push_str(&args.iter().map(render_expr).collect::<Vec<_>>().join(","));
                 out.push(')');
             }
             if let Some(ps) = props {
-                out.push_str(" {");
-                for p in ps {
-                    out.push(' ');
-                    out.push_str(&p.name);
-                    out.push(' ');
-                    out.push_str(&render_expr(&p.value));
-                }
+                out.push('{');
+                out.push_str(
+                    &ps.iter()
+                        .map(|p| format!("{} {}", p.name, render_expr(&p.value)))
+                        .collect::<Vec<_>>()
+                        .join(" "),
+                );
                 out.push('}');
             }
             out
         }
         Expr::UnaryMinus(inner) => format!("-{}", render_expr(inner)),
         Expr::Binary { op, lhs, rhs } => {
-            format!("{} {} {}", render_expr(lhs), op_sym(op), render_expr(rhs))
+            format!("{}{}{}", render_expr(lhs), op_sym(op), render_expr(rhs))
         }
     }
 }
@@ -559,29 +554,25 @@ fn render_stmt(s: &Stmt) -> String {
     match s {
         Stmt::Let { name, value } => format!("let {} = {}", name, render_expr(value)),
         Stmt::LetDestructure { names, value } => {
-            format!(
-                "let ({}) = {}",
-                names.join(", "),
-                render_expr(value)
-            )
+            format!("let ({}) = {}", names.join(","), render_expr(value))
         }
         Stmt::Assign { name, value } => format!("{} = {}", name, render_expr(value)),
         Stmt::ExprStmt(e) => render_expr(e),
         Stmt::Return(e) => format!("return {}", render_expr(e)),
-        Stmt::Block(inner) => format!("{{\n{}}}", render_stmts(inner)),
+        Stmt::Block(inner) => format!("{{{}}}", render_stmts(inner)),
         Stmt::If { cond, then_branch, else_branch } => {
-            let mut out = format!("if {} {{\n{}}}", render_expr(cond), render_stmts(then_branch));
+            let mut out = format!("if {} {{{}}}", render_expr(cond), render_stmts(then_branch));
             if !else_branch.is_empty() {
-                out.push_str(&format!(" else {{\n{}}}", render_stmts(else_branch)));
+                out.push_str(&format!("else {{{}}}", render_stmts(else_branch)));
             }
             out
         }
         Stmt::While { cond, body } => {
-            format!("while {} {{\n{}}}", render_expr(cond), render_stmts(body))
+            format!("while {} {{{}}}", render_expr(cond), render_stmts(body))
         }
         Stmt::For { var, start, end, body } => {
             format!(
-                "for {} in {} {} {{\n{}}}",
+                "for {} in {} {} {{{}}}",
                 var,
                 render_expr(start),
                 render_expr(end),
@@ -589,10 +580,10 @@ fn render_stmt(s: &Stmt) -> String {
             )
         }
         Stmt::Match { subject, arms } => {
-            let mut out = format!("match {} {{\n", render_expr(subject));
+            let mut out = format!("match {} {{", render_expr(subject));
             for arm in arms {
                 out.push_str(&format!(
-                    "{} => {{\n{}}}",
+                    "{}=>{{{}}}",
                     render_pattern(&arm.pattern),
                     render_stmts(&arm.body)
                 ));
@@ -603,35 +594,31 @@ fn render_stmt(s: &Stmt) -> String {
         Stmt::Navigate { path } => format!("@navigate({})", q(path)),
         Stmt::SetLocale { locale } => format!("@set_locale({})", q(locale)),
         Stmt::Directive { name, args } => {
-            let arg_s = args
-                .iter()
-                .map(render_expr)
-                .collect::<Vec<_>>()
-                .join(", ");
-            format!("@{name}({arg_s})")
+            format!(
+                "@{}({})",
+                name,
+                args.iter().map(render_expr).collect::<Vec<_>>().join(",")
+            )
         }
     }
 }
 
 fn render_stmts(stmts: &[Stmt]) -> String {
-    stmts
-        .iter()
-        .map(render_stmt)
-        .collect::<Vec<_>>()
-        .join("\n")
+    stmts.iter().map(render_stmt).collect::<Vec<_>>().join(" ")
 }
 
 fn render_props(props: &[Prop]) -> String {
-    let body = props
-        .iter()
-        .map(|p| format!("{} {}", p.name, render_expr(&p.value)))
-        .collect::<Vec<_>>()
-        .join(" ");
-    if body.is_empty() {
-        "{}".to_string()
-    } else {
-        format!("{{ {body} }}")
+    if props.is_empty() {
+        return "{}".to_string();
     }
+    format!(
+        "{{{}}}",
+        props
+            .iter()
+            .map(|p| format!("{} {}", p.name, render_expr(&p.value)))
+            .collect::<Vec<_>>()
+            .join(" ")
+    )
 }
 
 fn render_prop(p: &Prop) -> String {
@@ -645,11 +632,11 @@ pub(crate) fn render_top_level(item: &TopLevel) -> String {
         TopLevel::Entity(e) => {
             let mut out = format!("entity {} {{", q(&e.id));
             for p in &e.props {
-                out.push('\n');
-                out.push_str(&format!("{} {}", p.name, render_expr(&p.value)));
+                out.push(' ');
+                out.push_str(&render_prop(p));
             }
             for h in &e.handlers {
-                out.push('\n');
+                out.push(' ');
                 out.push_str(&render_handler(h));
             }
             out.push('}');
@@ -658,7 +645,7 @@ pub(crate) fn render_top_level(item: &TopLevel) -> String {
         TopLevel::Let { name, value } => format!("let {} = {}", name, render_expr(value)),
         TopLevel::Func(f) => {
             format!(
-                "func {}({}) {{\n{}}}",
+                "func {}({}){{{}}}",
                 f.name,
                 f.params.join(" "),
                 render_stmts(&f.body)
@@ -669,95 +656,100 @@ pub(crate) fn render_top_level(item: &TopLevel) -> String {
         TopLevel::UILayout(u) => render_ui_layout(u),
         TopLevel::Spatial3D(s) => render_spatial_3d(s, false),
         TopLevel::World(s) => render_spatial_3d(s, true),
-        TopLevel::UseJs(u) => format!("@use_js {{\n    url {}\n}}", q(&u.url)),
+        TopLevel::UseJs(u) => format!("@use_js{{url {}}}", q(&u.url)),
         TopLevel::Routes(r) => {
-            let mut out = String::from("routes {\n");
-            for route in &r.routes {
-                out.push_str(&format!("    route {} layout {}", q(&route.path), q(&route.layout)));
-                if let Some(t) = &route.transition {
-                    out.push_str(&format!(" transition {}", q(t)));
-                }
-                out.push('\n');
-            }
-            out.push('}');
-            out
+            let body = r
+                .routes
+                .iter()
+                .map(|route| {
+                    let mut s = format!("route {} layout {}", q(&route.path), q(&route.layout));
+                    if let Some(t) = &route.transition {
+                        s.push_str(&format!(" transition {}", q(t)));
+                    }
+                    s
+                })
+                .collect::<Vec<_>>()
+                .join(" ");
+            format!("routes{{{body}}}")
         }
         TopLevel::I18n(i) => {
-            let mut out = String::from("@i18n {\n");
-            for loc in &i.locales {
-                out.push_str(&format!("    locale {} {{\n", q(&loc.name)));
-                for (k, v) in &loc.entries {
-                    out.push_str(&format!("        {} {}\n", k, q(v)));
-                }
-                out.push_str("    }\n");
-            }
-            out.push('}');
-            out
+            let body = i
+                .locales
+                .iter()
+                .map(|loc| {
+                    let entries = loc
+                        .entries
+                        .iter()
+                        .map(|(k, v)| format!("{} {}", k, q(v)))
+                        .collect::<Vec<_>>()
+                        .join(" ");
+                    format!("locale {} {{{}}}", q(&loc.name), entries)
+                })
+                .collect::<Vec<_>>()
+                .join(" ");
+            format!("@i18n{{{body}}}")
         }
         TopLevel::Component(c) => {
-            let mut out = format!("component {} {{\n", c.name);
-            for h in &c.hooks {
-                out.push_str(&format!("    {}: {}\n", h.kind.as_str(), render_stmts(&h.body)));
-            }
-            out.push('}');
-            out
+            let body = c
+                .hooks
+                .iter()
+                .map(|h| format!("{}:{}", h.kind.as_str(), render_stmts(&h.body)))
+                .collect::<Vec<_>>()
+                .join(" ");
+            format!("component {} {{{body}}}", c.name)
         }
     }
 }
 
 fn render_payload(p: &PayloadDef) -> String {
-    let mut out = String::from("@payload {\n");
-    out.push_str(&format!("    sender {}\n", q(&p.sender)));
-    out.push_str(&format!("    target_agent {}\n", q(&p.target_agent)));
-    out.push_str(&format!("    intent {}\n", q(&p.intent)));
+    let mut parts = vec![
+        format!("sender {}", q(&p.sender)),
+        format!("target_agent {}", q(&p.target_agent)),
+        format!("intent {}", q(&p.intent)),
+    ];
     if let Some(state) = &p.state_data {
-        out.push_str(&format!("    state_data {}\n", render_expr(state)));
+        parts.push(format!("state_data {}", render_expr(state)));
     }
-    out.push('}');
-    out
+    format!("@payload{{{}}}", parts.join(" "))
 }
 
 fn render_ui_layout(u: &UILayoutDef) -> String {
-    let mut out = String::from("ui_layout ");
-    out.push_str(&q(&u.name));
-    out.push_str(" {\n");
-    out.push_str(&render_ui_component(&u.root, 1));
+    let mut out = format!("ui_layout {} {{", q(&u.name));
+    out.push_str(&render_ui_component(&u.root));
     out.push('}');
     out
 }
 
-fn render_ui_component(comp: &UIComponent, indent: usize) -> String {
-    let pad = "    ".repeat(indent);
+fn render_ui_component(comp: &UIComponent) -> String {
     match comp {
         UIComponent::Container { flex, children } => {
-            let mut out = String::new();
-            out.push_str(&pad);
-            out.push_str("container {\n");
+            let mut out = String::from("container{");
             if let Some(f) = flex {
-                out.push_str(&format!("{}    flex {}\n", pad, match f { FlexDirection::Row => "row", FlexDirection::Column => "column" }));
+                out.push_str(&format!(
+                    "flex {} ",
+                    match f {
+                        FlexDirection::Row => "row",
+                        FlexDirection::Column => "column",
+                    }
+                ));
             }
             for child in children {
-                out.push_str(&render_ui_component(child, indent + 1));
+                out.push_str(&render_ui_component(child));
+                out.push(' ');
             }
-            out.push_str(&pad);
-            out.push_str("}\n");
+            out.push('}');
             out
         }
-        UIComponent::Text { content } => {
-            format!("{pad}text {}\n", q(content))
-        }
+        UIComponent::Text { content } => format!("text {}", q(content)),
         UIComponent::Button { label, onClick } => {
-            let mut out = format!("{pad}button {}", q(label));
+            let mut out = format!("button {}", q(label));
             if let Some(h) = onClick {
-                // handler = identifier (parser: expect_ident) — JANGAN di-quote
-                out.push_str(&format!(" onClick {}\n", h));
-            } else {
-                out.push('\n');
+                out.push_str(&format!(" onClick {}", h));
             }
             out
         }
         UIComponent::Input { name, placeholder, bind, validate } => {
-            let mut out = format!("{pad}input {}", q(name));
+            let mut out = format!("input {}", q(name));
             if let Some(p) = placeholder {
                 out.push_str(&format!(" placeholder {}", q(p)));
             }
@@ -767,65 +759,64 @@ fn render_ui_component(comp: &UIComponent, indent: usize) -> String {
             if let Some(v) = validate {
                 out.push_str(&format!(" validate {}", q(v)));
             }
-            out.push('\n');
             out
         }
         UIComponent::Card { title, children } => {
-            let mut out = String::new();
-            out.push_str(&pad);
-            out.push_str("card");
+            let mut out = String::from("card");
             if let Some(t) = title {
                 out.push(' ');
                 out.push_str(&q(t));
             }
-            out.push_str(" {\n");
+            out.push('{');
             for child in children {
-                out.push_str(&render_ui_component(child, indent + 1));
+                out.push_str(&render_ui_component(child));
+                out.push(' ');
             }
-            out.push_str(&pad);
-            out.push_str("}\n");
+            out.push('}');
             out
         }
         UIComponent::Modal { title, children } => {
-            let mut out = String::new();
-            out.push_str(&pad);
-            out.push_str("modal");
+            let mut out = String::from("modal");
             if let Some(t) = title {
                 out.push(' ');
                 out.push_str(&q(t));
             }
-            out.push_str(" {\n");
+            out.push('{');
             for child in children {
-                out.push_str(&render_ui_component(child, indent + 1));
+                out.push_str(&render_ui_component(child));
+                out.push(' ');
             }
-            out.push_str(&pad);
-            out.push_str("}\n");
+            out.push('}');
             out
         }
         UIComponent::Navbar { title } => {
-            let mut out = format!("{pad}navbar");
+            let mut out = String::from("navbar");
             if let Some(t) = title {
                 out.push(' ');
                 out.push_str(&q(t));
             }
-            out.push('\n');
             out
         }
-        UIComponent::Footer { content } => {
-            format!("{pad}footer {}\n", q(content))
-        }
+        UIComponent::Footer { content } => format!("footer {}", q(content)),
     }
 }
 
 fn render_spatial_3d(s: &Spatial3DDef, is_world: bool) -> String {
     let mut out = String::new();
     if is_world {
-        out.push_str(&format!("world {} {{\n", q(&s.name)));
+        out.push_str(&format!("world {} {{", q(&s.name)));
     } else {
-        out.push_str(&format!("spatial_3d {} {{\n", q(&s.name)));
+        out.push_str(&format!("spatial_3d {} {{", q(&s.name)));
     }
-    for item in &s.items {
-        out.push_str(&render_spatial_item(item));
+    let items = s
+        .items
+        .iter()
+        .map(render_spatial_item)
+        .collect::<Vec<_>>()
+        .join(" ");
+    if !items.is_empty() {
+        out.push(' ');
+        out.push_str(&items);
     }
     out.push('}');
     out
@@ -833,30 +824,25 @@ fn render_spatial_3d(s: &Spatial3DDef, is_world: bool) -> String {
 
 fn render_spatial_item(item: &SpatialItem) -> String {
     match item {
-        SpatialItem::Camera(c) => {
-            format!("    camera {} {}\n", q(&c.id), render_props(&c.props))
-        }
-        SpatialItem::Light(l) => {
-            format!("    light {} {}\n", q(&l.id), render_props(&l.props))
-        }
+        SpatialItem::Camera(c) => format!("camera {} {}", q(&c.id), render_props(&c.props)),
+        SpatialItem::Light(l) => format!("light {} {}", q(&l.id), render_props(&l.props)),
         SpatialItem::Entity(e) => {
-            let mut out = String::new();
-            out.push_str(&format!("    entity {} {{\n", q(&e.id)));
+            let mut out = format!("entity {} {{", q(&e.id));
             for p in &e.props {
-                out.push_str(&format!("        {}\n", render_prop(p)));
+                out.push(' ');
+                out.push_str(&render_prop(p));
             }
             for h in &e.handlers {
+                out.push(' ');
                 out.push_str(&render_handler(h));
             }
-            out.push_str("    }\n");
+            out.push('}');
             out
         }
-        SpatialItem::Let { name, value } => {
-            format!("    let {} = {}\n", name, render_expr(value))
-        }
+        SpatialItem::Let { name, value } => format!("let {} = {}", name, render_expr(value)),
         SpatialItem::Func(f) => {
             format!(
-                "    func {}({}) {{\n{}}}\n",
+                "func {}({}){{{}}}",
                 f.name,
                 f.params.join(" "),
                 render_stmts(&f.body)
@@ -873,7 +859,7 @@ fn render_handler(h: &Handler) -> String {
         EventKind::Silent => "silent",
         EventKind::Click => "click",
     };
-    format!("on {ev} {{\n{}}}", render_stmts(&h.body))
+    format!("on {ev}{{{}}}", render_stmts(&h.body))
 }
 
 pub fn render_program(p: &Program) -> String {
@@ -976,7 +962,8 @@ mod tests {
         // Urutan penemuan: get_status, x_position, y_speed, code, msg →
         // a=get_status, b=x_position, c=y_speed, d=code, e=msg.
         assert!(opt.contains("func a()"), "fungsi di-rename:\n{opt}");
-        assert!(opt.contains("let b = t * 1.5"), "variabel panjang di-rename:\n{opt}");
+        assert!(opt.contains("let b = t*1.5"), "variabel panjang di-rename:\n{opt}");
+        assert!(opt.contains("setPos(b,c,0)"), "call arg rapat tanpa spasi:\n{opt}");
         assert!(!opt.contains("x_position"), "nama lama tidak boleh tersisa:\n{opt}");
         // Semantik: state evaluasi sebelum vs sesudah optimize harus identik.
         assert_eq!(eval_snapshot(src), eval_snapshot(&opt), "semantik berubah:\n{opt}");
@@ -1050,4 +1037,55 @@ mod tests {
     fn optimize_menolak_source_invalid() {
         assert!(optimize_src("world \"w\" { entity \"e\" { mesh sphre { } } }").is_err());
     }
+
+    #[test]
+    fn optimize_kompak_tanpa_spasi_opsional() {
+        // Biner tanpa spasi, list/map rapat, braces rapat — roundtrip & semantik.
+        let src = r#"
+            world "T" {
+                entity "e" {
+                    on frame {
+                        let a = 2 + 3 * 4
+                        let b = [1, 2, 3]
+                        let c = { timeout: 30, retry: 3 }
+                    }
+                }
+            }
+        "#;
+        let opt = optimize_src(src).unwrap();
+        assert!(opt.contains("2+3*4"), "biner tanpa spasi:\\n{opt}");
+        assert!(opt.contains("[1,2,3]"), "list rapat:\\n{opt}");
+        assert!(opt.contains("{timeout:30,retry:3}"), "map rapat:\\n{opt}");
+        roundtrip_ok(src);
+        assert_eq!(eval_snapshot(src), eval_snapshot(&opt), "semantik berubah:\\n{opt}");
+    }
+
+    #[test]
+    fn optimize_roundtrip_korpus_fullstack() {
+        // Template fullstack: @use_js, @payload, routes, @i18n, ui_layout,
+        // component (lifecycle hooks), func + directive — semua varian
+        // top-level harus roundtrip identik + idempotent + tidak membengkak.
+        let src = include_str!("../templates/fullstack-agent.adi");
+        let before = parse(src).expect("source asli harus valid");
+        let opt = optimize_src(src).unwrap();
+        let after = parse(&opt).expect("hasil optimize harus valid");
+        // Rename bijektif mengubah NAMA bound, tapi struktur top-level identik.
+        assert_eq!(
+            before.items.len(),
+            after.items.len(),
+            "struktur top-level berubah:\n{opt}"
+        );
+        // idempotent + tidak membengkak
+        assert_eq!(
+            opt,
+            optimize_src(&opt).expect("optimize ulang harus berhasil")
+        );
+        assert!(
+            opt.len() <= src.len(),
+            "compact tidak boleh membengkak: {} vs {}",
+            opt.len(),
+            src.len()
+        );
+    }
+
 }

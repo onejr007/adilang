@@ -457,7 +457,7 @@ entity "extra" { pos (1 2 3) }
         let out = apply_doc(base_doc(), &ops).expect("apply ok");
         assert!(out.contains("Halo"));
         assert!(out.contains("spatial_3d"));
-        assert!(out.contains("rotate(0.35 * t"));
+        assert!(out.contains("rotate(0.35*t"));
         assert!(!out.contains("Hello"));
     }
 
@@ -551,7 +551,7 @@ adilang-patch 1.0.0
         let out = apply_patch_script(base_doc(), script).expect("apply ok");
         assert!(out.contains("Halo"));
         assert!(!out.contains("Hello"));
-        assert!(out.contains("rotate(0.35 * t"));
+        assert!(out.contains("rotate(0.35*t"));
         parser::parse(&out).expect("hasil harus valid ADILang");
     }
 
