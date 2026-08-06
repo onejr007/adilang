@@ -1,43 +1,88 @@
 """
-ADILang Standalone Python SDK
-=============================
-
-ADILang (Agent Distributed Intelligence Language) is an AI-to-AI protocol / Intermediate Representation (IR).
-This package is pure Python stdlib with ZERO external dependencies.
+adilang — Standalone Pure Python SDK for ADILang
+=================================================
+Agent Distributed Intelligence Language (AI-to-AI Communication Protocol & Mental State IR).
 
 Lead Developer: BAGAS ADI PRATAMA S,Kom.
 """
-
 from adilang.protocol import (
     VERSION,
-    ADILANG_PROMPT,
     encode_intent,
     encode_reply,
     encode_task,
-    encode_event,
     encode_memory,
     encode_plan,
+    encode_event,
     encode_state,
     parse_adilang,
+    parse_module,
     validate_adilang,
+    validate_module,
     auto_fix,
-    minify,
+    plan_topological_order,
+    extract_modules,
 )
-
-__version__ = VERSION
+from adilang.compactor import (
+    optimize_src,
+    render_program,
+    render_expr,
+    render_pretty,
+)
+from adilang.knowledge import (
+    ADILANG_KNOWLEDGE_COMPACT,
+    get_adilang_knowledge,
+    get_adilang_registry,
+)
+from adilang.agent_card import (
+    create_agent_card,
+    validate_agent_card,
+    agent_card_to_json,
+    agent_card_from_json,
+    get_well_known_url,
+)
+from adilang.mcp_bridge import MCPBridge
+from adilang.a2a_bridge import A2ABridge
+from adilang.errors import (
+    ADILangError,
+    ERROR_CODES,
+    classify_message,
+    hint_for,
+    normalize_errors,
+)
 
 __all__ = [
     "VERSION",
-    "ADILANG_PROMPT",
     "encode_intent",
     "encode_reply",
     "encode_task",
-    "encode_event",
     "encode_memory",
     "encode_plan",
+    "encode_event",
     "encode_state",
     "parse_adilang",
+    "parse_module",
     "validate_adilang",
+    "validate_module",
     "auto_fix",
-    "minify",
+    "plan_topological_order",
+    "extract_modules",
+    "optimize_src",
+    "render_program",
+    "render_expr",
+    "render_pretty",
+    "ADILANG_KNOWLEDGE_COMPACT",
+    "get_adilang_knowledge",
+    "get_adilang_registry",
+    "create_agent_card",
+    "validate_agent_card",
+    "agent_card_to_json",
+    "agent_card_from_json",
+    "get_well_known_url",
+    "MCPBridge",
+    "A2ABridge",
+    "ADILangError",
+    "ERROR_CODES",
+    "classify_message",
+    "hint_for",
+    "normalize_errors",
 ]
