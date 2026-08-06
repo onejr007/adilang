@@ -2,7 +2,7 @@
 adilang/python/tests/test_standalone_protocol.py
 =================================================
 Unit tests for the standalone ADILang Python SDK.
-Verifies zero external dependencies, compactor, bridges, agent card, and errors.
+Verifies zero external dependencies, compactor, bridges, agent card, binary stream encoding, and errors.
 """
 import pytest
 from adilang import (
@@ -23,6 +23,11 @@ from adilang import (
     get_adilang_registry,
     create_agent_card,
     validate_agent_card,
+    encode_msgpack,
+    decode_msgpack,
+    encode_cbor,
+    decode_cbor,
+    compare_encoding_sizes,
     MCPBridge,
     A2ABridge,
     ADILangError,
@@ -129,6 +134,28 @@ def test_a2a_bridge():
     adilang_text = A2ABridge.a2a_to_adilang_text(a2a_task)
     assert 'task "task_456"' in adilang_text
     assert 'event "a2a_task_received"' in adilang_text
+
+
+def test_binary_encoding():
+    ir_text = encode_intent(mode="MODE_CONVERSATION", payload="Binary test")
+    parsed = parse_adilang(ir_text)
+    
+    # MessagePack round-trip
+    msgpack_bytes = encode_msgpack(parsed)
+    assert len(msgpack_bytes) > 0
+    decoded_msgpack = decode_msgpack(msgpack_bytes)
+    assert decoded_msgpack["intent"]["payload"] == "Binary test"
+
+    # CBOR round-trip
+    cbor_bytes = encode_cbor(parsed)
+    assert len(cbor_bytes) > 0
+    decoded_cbor = decode_cbor(cbor_bytes)
+    assert decoded_cbor["intent"]["payload"] == "Binary test"
+
+    # Encoding size comparison
+    sizes = compare_encoding_sizes(ir_text)
+    assert "msgpack" in sizes
+    assert "cbor" in sizes
 
 
 def test_error_classification():

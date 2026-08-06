@@ -40,6 +40,13 @@ from adilang.agent_card import (
     agent_card_from_json,
     get_well_known_url,
 )
+from adilang.binary import (
+    encode_msgpack,
+    decode_msgpack,
+    encode_cbor,
+    decode_cbor,
+    compare_encoding_sizes,
+)
 from adilang.mcp_bridge import MCPBridge
 from adilang.a2a_bridge import A2ABridge
 from adilang.errors import (
@@ -78,6 +85,11 @@ __all__ = [
     "agent_card_to_json",
     "agent_card_from_json",
     "get_well_known_url",
+    "encode_msgpack",
+    "decode_msgpack",
+    "encode_cbor",
+    "decode_cbor",
+    "compare_encoding_sizes",
     "MCPBridge",
     "A2ABridge",
     "ADILangError",
