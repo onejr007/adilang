@@ -35,6 +35,52 @@ ADILang punya **satu modul per dokumen**:
 | [`docs/adilang.ebnf`](docs/adilang.ebnf) | Grammar formal W3C-EBNF (machine-parseable). |
 | [`docs/ADILANG_KNOWLEDGE.md`](docs/ADILANG_KNOWLEDGE.md) | Knowledge base = dataset untuk AI lain belajar ADILang. |
 
+## Pemasangan & Penggunaan Mandiri (Standalone — Tanpa Sistem ADI)
+
+ADILang dapat digunakan 100% mandiri di aplikasi Python atau agen AI Anda tanpa tergantung pada Sistem Utama ADI:
+
+### 1. Pemasangan SDK Python (`adilang` Package)
+
+```bash
+cd adilang/python
+pip install -e .
+```
+
+### 2. Penggunaan di Kode Python
+
+```python
+import adilang
+
+# Buat blok IR intent (pesan input agen/user)
+intent_ir = adilang.encode_intent(
+    mode="MODE_CODE_ENGINEERING",
+    payload="Buatkan fungsi Python fibonacci",
+    verb="command"
+)
+print(intent_ir)
+
+# Parse pesan ADILang menjadi dictionary Python
+parsed = adilang.parse_adilang(intent_ir)
+print(parsed["intent"]["payload"])
+
+# Validasi sintaks terhadap closed vocabulary
+errors = adilang.validate_adilang(intent_ir)
+print("Errors:", errors) # [] jika valid
+```
+
+### 3. Penggunaan CLI Tool (`adilang-cli`)
+
+```bash
+# Validasi file .adi
+adilang-cli check my_file.adi
+
+# Parse file .adi ke JSON IR
+adilang-cli parse my_file.adi
+
+# Otomatis perbaiki kesalahan sintaks/kunci
+adilang-cli fix my_file.adi
+```
+
 ## Contoh minimal
 
 Modul `intent` (setiap chat user diterjemahkan menjadi blok ini):
