@@ -61,11 +61,11 @@ def test_validate_valid_and_invalid():
     invalid_ir = 'intent "ask" { invalid_key "bad" }'
     errs_inv = validate_adilang(invalid_ir)
     assert len(errs_inv) > 0
-    assert "Kunci tidak valid" in errs_inv[0]
+    assert "Kunci tidak dikenal" in errs_inv[0]
 
 
 def test_auto_fix():
     bad_ir = 'intent "ask" { mode "MODE_CONVERSATION" payload "Hello" bad_key "x" }'
-    fixed = auto_fix(bad_ir)
-    errs = validate_adilang(fixed)
+    fixed_text, _ = auto_fix(bad_ir)
+    errs = validate_adilang(fixed_text)
     assert len(errs) == 0
