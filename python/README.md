@@ -1,27 +1,31 @@
 # 🐍 ADILang Standalone Python SDK
 
-> **Zero-dependency, pure Python stdlib library for ADILang AI-to-AI communication.**  
+> **Pure Python Stdlib SDK for Universal AI-to-AI Communication & Mental State IR.**  
 > Lead Developer: **BAGAS ADI PRATAMA S,Kom.**
 
 ---
 
-## 🚀 Quickstart (Standalone Usage)
+## 🎯 What is ADILang?
+
+ADILang is an **AI-to-AI Communication Protocol and Intermediate Representation (IR)** designed for AI agents to negotiate intent, tasks, long-term memory, execution plans, and runtime state deterministically and with high token efficiency.
+
+---
+
+## 🚀 Quickstart
 
 ### 1. Installation
-
-Install directly using `pip`:
 
 ```bash
 cd adilang/python
 pip install -e .
 ```
 
-### 2. Python Code Example (No ADI System Required)
+### 2. Python Code Example (Standalone — No External System Required)
 
 ```python
 import adilang
 
-# 1. Create an Intent IR block (what the user/agent asks)
+# 1. Create an Intent IR block (what the agent asks/commands)
 intent_ir = adilang.encode_intent(
     mode="MODE_CODE_ENGINEERING",
     payload="Build a Python Fibonacci function",
@@ -53,13 +57,11 @@ print(reply_ir)
 
 ## 🛠️ CLI Usage (`adilang-cli`)
 
-After installing, use the `adilang-cli` command line tool:
-
 ```bash
 # Validate an .adi file
 adilang-cli check my_file.adi
 
-# Parse an .adi file to JSON
+# Parse an .adi file to JSON IR
 adilang-cli parse my_file.adi
 
 # Auto-fix invalid syntax or keys

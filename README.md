@@ -1,172 +1,93 @@
-# ADILang
+# ADILang (Agent Distributed Intelligence Language)
 
-**Bahasa protokol / IR yang dirancang AI (ADI), untuk AI.**
+> **Bahasa Protokol / IR Universal AI-to-AI**  
+> Diciptakan dan dikembangkan oleh **ADI (Agent Distributed Intelligence)**  
+> Lead Developer: **BAGAS ADI PRATAMA S,Kom.**
 
-ADILang adalah bahasa utama (protocol / intermediate-representation) di ekosistem
-**ADI (Agent Distributed Intelligence)** — diciptakan dan dikembangkan oleh ADI
-sendiri, untuk dipakai antar-AI dan oleh backend ADI. Manusia tidak perlu
-mempelajarinya: ADILang dibuat khusus agar AI dapat **membaca, menghasilkan,
-memverifikasi, dan memperluasnya** secara deterministik, rendah ambiguitas, dan
-hemat token.
-
-ADILang punya **satu modul per dokumen**:
-
-| Modul | Bentuk | Fungsi | Runtime |
-|---|---|---|---|
-| `intent` | `intent "<verb>" { ... }` | Representasi ter-normalisasi dari setiap permintaan/chat user. | Backend ADI (Python) |
-| `reply` | `reply "<kind>" { ... }` | Jawaban terstruktur ADI (konten + metadata). | Backend ADI |
-| `task` | `task "<name>" { ... }` | Perintah kerja agent (CrewAI). | CrewAI |
-| `event` | `event "<name>" { ... }` | Catatan kejadian/fakta sistem. | Backend ADI |
-| `memory` | `memory "<name>" { ... }` | Pertukaran fakta/konteks jangka panjang antar-agen (v1.5.0). | Backend ADI |
-| `plan` | `plan "<name>" { ... }` | DAG langkah eksekusi sekuensial/paralel untuk CrewAI (v1.5.0). | CrewAI |
-| `world` | `world "<name>" { ... }` | Dunia 3D interaktif (hologram). | Rust → WASM → WebGL2 |
-
-> **Pencipta & Developer**: ADI (Agent Distributed Intelligence)
-> **Status**: v1.9.0 — STABLE
-> **Repo**: https://github.com/onejr007/adilang
+ADILang adalah **bahasa Intermediate Representation (IR) & protokol komunikasi murni antar-AI**. ADILang **bukan** bahasa pemrograman frontend atau renderer visual 3D — melainkan protokol khusus yang dirancang agar sistem AI/LLM dapat **membaca, memproses, memvalidasi, dan menegosiasikan mental state** (keinginan, tugas, memori, rencana, dan status) secara **deterministik, terstruktur, dan hemat token**.
 
 ---
 
-## Dokumentasi (normatif)
+## 🎯 Mengapa ADILang? ("What the AI Thinks")
 
-| File | Isi |
-|---|---|
-| [`docs/LANGUAGE.md`](docs/LANGUAGE.md) | Spesifikasi bahasa: semantik, modul protocol/IR, registry builtin, model eksekusi, protokol ekstensi. |
-| [`docs/adilang.ebnf`](docs/adilang.ebnf) | Grammar formal W3C-EBNF (machine-parseable). |
-| [`docs/ADILANG_KNOWLEDGE.md`](docs/ADILANG_KNOWLEDGE.md) | Knowledge base = dataset untuk AI lain belajar ADILang. |
+* **MCP (Anthropic)**: Menangani *"What the AI DOES"* (Panggilan tools & integrasi sumber daya).
+* **A2A (Google)**: Menangani *"Who does WHAT"* (Delegasi tugas berbasis HTTP/REST).
+* **ADILang**: Menangani **"What the AI THINKS"** (Mental State IR: Intent, Reply, Task, Event, Memory, Plan, State).
 
-## Pemasangan & Penggunaan Mandiri (Standalone — Tanpa Sistem ADI)
+---
 
-ADILang dapat digunakan 100% mandiri di aplikasi Python atau agen AI Anda tanpa tergantung pada Sistem Utama ADI:
+## 🧩 Struktur Modul Protokol AI-to-AI
 
-### 1. Pemasangan SDK Python (`adilang` Package)
+ADILang terdiri dari modul-modul terstruktur dengan *closed vocabulary*:
+
+| Modul | Contoh Sintaks | Fungsi Protokol AI-to-AI |
+| :--- | :--- | :--- |
+| **`intent`** | `intent "ask" { mode "MODE_CODE_ENGINEERING" payload "..." }` | Normalisasi kanonik dari setiap permintaan/perintah AI. |
+| **`reply`** | `reply "answer" { mode "..." content "..." recs [ "..." ] }` | Tanggapan terstruktur dari AI pengirim (konten + opsi rekomendasi). |
+| **`task`** | `task "code_review" { assign "agent_1" input "..." expect "..." }` | Perintah kerja & delegasi tugas ke agen lain (*multi-agent orchestration*). |
+| **`event`** | `event "syntax_error" { source "..." line "10" guidance "..." }` | Telemetri & catatan kejadian sistem real-time untuk audit & *self-healing*. |
+| **`memory`** | `memory "user_fact" { key "pref" fact "..." confidence "0.95" }` | Pertukaran fakta/memori jangka panjang tanpa membengkakkan riwayat chat. |
+| **`plan`** | `plan "build" { steps [ "1:research:", "2:code:1" ] parallel "0" }` | Formulasi Directed Acyclic Graph (DAG) langkah eksekusi antar-agen. |
+| **`state`** | `state "stream" { user_key "..." status "active" progress "50%" }` | Sinkronisasi status *runtime* real-time antar-agen. |
+
+---
+
+## ⚡ Keunggulan Utama ADILang
+
+1. **Deterministik & Validasi Ketat**: Sintaks divalidasi terhadap grammar EBNF ([docs/adilang.ebnf](docs/adilang.ebnf)). Kunci acak/tidak dikenal akan ditolak, memicu *self-healing retry loop*.
+2. **Efisiensi Token Terukur**: Menghemat **−21% hingga −47% token** dibanding format JSON/YAML setara.
+3. **Multi-Agent Interoperability**: Menyediakan jembatan bawaan ke **MCP** (Anthropic) dan **A2A** (Google).
+
+---
+
+## 🚀 Pemasangan & Penggunaan Mandiri (Standalone Python SDK)
+
+ADILang dapat di-install dan digunakan di aplikasi Python atau agen AI buatan Anda tanpa ketergantungan pada sistem luar:
 
 ```bash
-cd adilang/python
+cd python
 pip install -e .
 ```
 
-### 2. Penggunaan di Kode Python
-
+### Contoh Kode Python Mandiri:
 ```python
 import adilang
 
-# Buat blok IR intent (pesan input agen/user)
+# 1. AI Anda membuat pesan Intent IR
 intent_ir = adilang.encode_intent(
     mode="MODE_CODE_ENGINEERING",
-    payload="Buatkan fungsi Python fibonacci",
+    payload="Buatkan saya fungsi Python fibonacci",
     verb="command"
 )
 print(intent_ir)
 
-# Parse pesan ADILang menjadi dictionary Python
+# 2. Parse pesan ADILang IR menjadi Dictionary Python
 parsed = adilang.parse_adilang(intent_ir)
 print(parsed["intent"]["payload"])
 
-# Validasi sintaks terhadap closed vocabulary
+# 3. Validasi sintaks terhadap closed vocabulary
 errors = adilang.validate_adilang(intent_ir)
-print("Errors:", errors) # [] jika valid
+print("Validation Errors:", errors)  # [] jika valid
 ```
 
-### 3. Penggunaan CLI Tool (`adilang-cli`)
-
+### Penggunaan Alat Baris Perintah (`adilang-cli`)
 ```bash
-# Validasi file .adi
-adilang-cli check my_file.adi
+# Periksa & validasi file .adi
+adilang-cli check pesan.adi
 
-# Parse file .adi ke JSON IR
-adilang-cli parse my_file.adi
+# Convert file .adi ke JSON IR
+adilang-cli parse pesan.adi
 
-# Otomatis perbaiki kesalahan sintaks/kunci
-adilang-cli fix my_file.adi
+# Perbaiki kesalahan sintaks/kunci secara otomatis
+adilang-cli fix pesan.adi
 ```
 
-## Contoh minimal
+---
 
-Modul `intent` (setiap chat user diterjemahkan menjadi blok ini):
+## 📚 Dokumen Referensi Formal
 
-```
-intent "ask" {
-    mode "MODE_CODE_ENGINEERING"
-    payload "buatkan script python fibonacci"
-    verb "ask"
-}
-```
-
-Modul `world` (dunia 3D / hologram):
-
-```
-world "hello" {
-    camera "cam" { pos (0 1.6 6) look (0 0 0) fov 55 }
-    entity "globe" {
-        pos (0 0 0)
-        mesh sphere { radius 1 segments 4 }
-        material wire (0.2 0.8 1) 0.9
-        on frame { rotate(0.3 * t, (0 1 0)) }
-    }
-}
-```
-
-## Struktur repo
-
-```
-adilang/
-  Cargo.toml
-  src/
-    lexer.rs      # tokenizer
-    ast.rs        # AST
-    parser.rs     # recursive descent
-    eval.rs       # interpreter (tree-walking)
-    scene.rs      # model dunia 3D
-    math3d.rs     # mat4 / vec3
-    engine.rs     # renderer WebGL2 (glow) — hanya wasm32
-    wasm_api.rs   # wasm-bindgen boundary — hanya wasm32
-    lib.rs        # entry + unit tests
-  worlds/
-    default.adi   # world script bawaan
-  docs/           # spesifikasi + grammar + knowledge base
-```
-
-## Build & uji
-
-```bash
-cargo test                        # uji native (lexer/parser/eval/math3d)
-cargo build --target wasm32-unknown-unknown
-wasm-pack build --target web      # → pkg/ (WASM + JS loader)
-```
-
-Syarat toolchain: Rust stable + target `wasm32-unknown-unknown` + `wasm-pack`.
-
-## API WASM (host) — modul world
-
-| Export | Signature | Purpose |
-|---|---|---|
-| `adilang_start(canvas_id)` | `Result<(), String>` | init engine + loop render |
-| `adilang_load(source)` | `Result<(), String>` | hot-reload world |
-| `adilang_check(source)` | `Result<(), String>` | validasi sintaks |
-| `adilang_speak()` / `adilang_silent()` | `Result<(), String>` | trigger event |
-| `adilang_debug_count()` | `usize` | jumlah entity |
-| `adilang_version()` | `String` | versi bahasa |
-| `adilang_registry()` | `String` | enumerasi kosakata tertutup (P6) |
-
-## ADILang sebagai Protocol / IR di ekosistem ADI
-
-- **Semua input user diterjemahkan ke ADILang.** Setiap chat/perintah dari Telegram
-  bot, web, CLI, maupun TMA diproses menjadi satu blok `intent` sebelum diolah lebih
-  lanjut — sehingga seluruh pipeline bekerja di atas representasi yang seragam,
-  terstruktur, dan deterministik.
-- **Hemat token.** Sintaksnya ringkas, tanpa karakter bermakna dari whitespace, dan
-  nilai protocol berupa `String`/`String[]` sederhana. LLM tidak perlu mempelajari
-  aturan baru untuk memancarkan blok IR.
-- **Sistematis & terstruktur.** Semua blok diverifikasi terhadap daftar kunci tertutup;
-  kunci duplikat/tidak dikenal ditolak (validasi deterministik).
-- **Bisa dipelajari semua LLM.** `docs/ADILANG_KNOWLEDGE.md` adalah corpus belajar
-  mandiri — model apa pun bisa memahami ADILang dari nol.
-
-## Ekstensibilitas
-
-ADILang dirancang agar AI dapat meng-improve tanpa koordinasi — lihat
-**Protokol Ekstensi** di `docs/LANGUAGE.md` §11. Aturan inti:
-- minor/patch = **additive only**;
-- breaking change = wajib MAJOR bump + perbarui seluruh docs + KB;
-- setiap fitur baru wajib sinkron: grammar ↔ parser ↔ evaluator ↔ docs ↔ KB ↔ unit test.
+| Berkas | Isi |
+| :--- | :--- |
+| [`docs/LANGUAGE.md`](docs/LANGUAGE.md) | Spesifikasi bahasa: semantik modul protocol/IR & aturan ekstensi. |
+| [`docs/adilang.ebnf`](docs/adilang.ebnf) | Formal W3C-EBNF Grammar (machine-parseable). |
+| [`docs/ADILANG_KNOWLEDGE.md`](docs/ADILANG_KNOWLEDGE.md) | Master Knowledge Base = dataset untuk AI lain mempelajari ADILang. |
